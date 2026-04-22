@@ -1,0 +1,56 @@
+{
+  "name": "@percy/styleguidist",
+  "version": "0.1.0",
+  "description": "Percy CLI plugin for visual testing React Styleguidist components",
+  "keywords": [
+    "percy",
+    "visual-testing",
+    "react-styleguidist",
+    "styleguidist",
+    "visual",
+    "test"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/percy/percy-styleguidist.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "main": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./package.json": "./package.json"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "babel src --out-dir dist"
+  },
+  "@percy/cli": {
+    "commands": [
+      "./dist/styleguidist.js"
+    ]
+  },
+  "peerDependencies": {
+    "@percy/cli": "^1.31.0",
+    "react-styleguidist": ">=11.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react-styleguidist": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@babel/cli": "^7.26.0",
+    "@babel/core": "^7.26.0",
+    "@babel/preset-env": "^7.26.0"
+  }
+}
