@@ -127,12 +127,8 @@ export async function httpPostJson(url, body, { timeoutMs = 30_000 } = {}) {
 export async function getTurboSnapFilter({ percy, rsgConfig, components, log }, deps = defaultDeps) {
   let { execFileSync, rsgBuild, httpPostJson: httpPost } = { ...defaultDeps, ...deps };
 
-  // 1. Baseline SHA — only present after first build in the project.
-  // Dev override: `PERCY_TURBOSNAP_BASELINE_SHA=<sha>` lets local testers pin a
-  // baseline when the backend's base-build resolution is unavailable (e.g. no
-  // Sidekiq worker running locally). Must be a valid 40-char hex SHA.
-  let baselineSha = (percy && percy.build && percy.build.baselineCommitSha)
-    || process.env.PERCY_TURBOSNAP_BASELINE_SHA;
+  // 1. Baseline SHA — only present after first build in the project
+  let baselineSha = percy && percy.build && percy.build.baselineCommitSha;
   if (!baselineSha) {
     log.debug('TurboSnap: No baseline commit available, snapshotting all');
     return null;
