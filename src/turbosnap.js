@@ -1,8 +1,17 @@
-import { execFileSync } from 'child_process';
-import { rsgBuild } from './rsg-adapter.js';
+import { execFileSync as _execFileSync } from 'child_process';
+import { rsgBuild as _rsgBuild } from './rsg-adapter.js';
 
 // SHA validation — defense-in-depth alongside execFileSync (which already avoids shell).
 const SHA_PATTERN = /^[0-9a-f]{40}$/i;
+
+// Test seams. Production code uses the defaults; tests can override via
+// the `deps` parameter on getTurboSnapFilter(). We avoid rewiring module
+// globals so ESM binding immutability doesn't bite.
+export const defaultDeps = {
+  execFileSync: (...args) => _execFileSync(...args),
+  rsgBuild: (...args) => _rsgBuild(...args),
+  httpPostJson: (...args) => httpPostJson(...args)
+};
 
 // Extract only module dependency edges from full webpack stats.
 // At 200 components: full stats ~10MB → edges ~100KB
@@ -26,7 +35,7 @@ export function extractModuleEdges(statsJson) {
 // Invoke RSG's programmatic build to capture webpack Stats.
 // RSG signature (verified in node_modules/react-styleguidist/lib/scripts/build.js):
 //   build(config, callback)  where  callback(err, stats)
-export function captureWebpackStats(rsgConfig) {
+export function captureWebpackStats(rsgConfig, rsgBuild = defaultDeps.rsgBuild) {
   return new Promise((resolve, reject) => {
     try {
       rsgBuild(rsgConfig, (err, stats) => {
@@ -113,9 +122,13 @@ export async function httpPostJson(url, body, { timeoutMs = 30_000 } = {}) {
 //   Set<>     → empty set means "skip everything" (0 components affected)
 //
 // Every failure path returns null (full snapshot) — TurboSnap must never block the build.
-export async function getTurboSnapFilter({ percy, rsgConfig, components, log }) {
+//
+// `deps` is a test seam — production callers omit it.
+export async function getTurboSnapFilter({ percy, rsgConfig, components, log }, deps = defaultDeps) {
+  let { execFileSync, rsgBuild, httpPostJson: httpPost } = { ...defaultDeps, ...deps };
+
   // 1. Baseline SHA — only present after first build in the project
-  let baselineSha = percy?.build?.baselineCommitSha;
+  let baselineSha = percy && percy.build && percy.build.baselineCommitSha;
   if (!baselineSha) {
     log.debug('TurboSnap: No baseline commit available, snapshotting all');
     return null;
@@ -147,7 +160,7 @@ export async function getTurboSnapFilter({ percy, rsgConfig, components, log }) 
   // 3. Capture webpack stats by invoking RSG's build() directly, then extract edges
   let moduleEdges;
   try {
-    let statsJson = await captureWebpackStats(rsgConfig);
+    let statsJson = await captureWebpackStats(rsgConfig, rsgBuild);
     moduleEdges = extractModuleEdges(statsJson);
   } catch (e) {
     log.debug(`TurboSnap: webpack stats capture failed (${e.message}), snapshotting all`);
@@ -176,7 +189,7 @@ export async function getTurboSnapFilter({ percy, rsgConfig, components, log }) 
   let serverAddress = process.env.PERCY_SERVER_ADDRESS || `http://localhost:${percy.port}`;
 
   try {
-    let resp = await httpPostJson(`${serverAddress}/percy/turbosnap`, {
+    let resp = await httpPost(`${serverAddress}/percy/turbosnap`, {
       changedFiles,
       webpackStatsGz,
       componentFilePaths

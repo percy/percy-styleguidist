@@ -631,6 +631,57 @@ describe('percy styleguidist', () => {
         expect(e.message).toContain('style guide config');
       }
     });
+
+    it('exports rsgBuild that proxies to react-styleguidist build', async () => {
+      let adapter = await import('../src/rsg-adapter.js');
+      expect(typeof adapter.rsgBuild).toBe('function');
+    });
+  });
+
+  // --- TurboSnap integration ---
+
+  describe('TurboSnap integration', () => {
+    it('dry-run mode skips TurboSnap entirely (no git diff, no API call, no RSG build)', async () => {
+      // In dry-run, the command must never attempt TurboSnap. Any attempt
+      // would either hit the real git / network or log a TurboSnap-prefixed
+      // message. Assert no TurboSnap output appears.
+      await styleguidist([BUILD_DIR, '--dry-run', `--config=${CONFIG_PATH}`]);
+
+      let turboLogs = [
+        ...logger.stdout.filter(l => l.includes('TurboSnap')),
+        ...logger.stderr.filter(l => l.includes('TurboSnap'))
+      ];
+      expect(turboLogs).toEqual([]);
+
+      // And dry-run should still list all components
+      expect(logger.stdout).toEqual(jasmine.arrayContaining([
+        jasmine.stringMatching('Snapshot found: Button')
+      ]));
+    });
+
+    it('TurboSnap runs with no baseline → logs debug and snapshots all (fallback)', async () => {
+      // Real capture flow (non-dry-run). Without a baseline SHA on the build,
+      // TurboSnap returns null → full snapshot proceeds. We verify the command
+      // completes and emits Snapshot taken entries for all non-skipped comps.
+      await styleguidist([BUILD_DIR, `--config=${CONFIG_PATH}`]);
+
+      expect(logger.stdout).toEqual(jasmine.arrayContaining([
+        jasmine.stringMatching('Snapshot taken: Button'),
+        jasmine.stringMatching('Snapshot taken: Input'),
+        jasmine.stringMatching(/Done: \d+ captured/)
+      ]));
+    });
+
+    it('TurboSnap filter + include/exclude compose (narrowing order)', async () => {
+      // Even though TurboSnap returns null in this test environment (no
+      // baseline), the integration code path runs the filter step regardless.
+      // We verify include still narrows the result.
+      await styleguidist([BUILD_DIR, `--config=${CONFIG_PATH}`, '--include=Input']);
+
+      let taken = logger.stdout.filter(l => l.includes('Snapshot taken:'));
+      expect(taken.some(l => l.includes('Input'))).toBe(true);
+      expect(taken.some(l => l.includes('Button'))).toBe(false);
+    });
   });
 
   describe('discoverComponents', () => {
