@@ -1,0 +1,31 @@
+name: Test
+permissions:
+  contents: read
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+jobs:
+  test:
+    name: Test
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        node: [18, 20, 22]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}/node-${{ matrix.node }}/${{ hashFiles('**/package-lock.json') }}
+          restore-keys: ${{ runner.os }}/node-${{ matrix.node }}/
+      - run: npm install
+        env:
+          PERCY_POSTINSTALL_BROWSER: true
+      - run: npm run build
+      - run: npm run test:coverage
