@@ -28,4 +28,8 @@ jobs:
         env:
           PERCY_POSTINSTALL_BROWSER: true
       - run: npm run build
+      # Download Chromium before tests — tests run in a mock environment
+      # that intercepts HTTP requests, so Chromium must be pre-installed
+      - name: Ensure Chromium is installed
+        run: node -e "import('./node_modules/@percy/core/dist/install.js').then(m => m.chromium()).then(p => console.log('Chromium:', p))"
       - run: npm run test:coverage
