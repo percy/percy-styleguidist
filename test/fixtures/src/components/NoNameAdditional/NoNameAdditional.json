@@ -1,0 +1,7 @@
+{
+  "percy": {
+    "additionalSnapshots": [
+      { "widths": [800] }
+    ]
+  }
+}

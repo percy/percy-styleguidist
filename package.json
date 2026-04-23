@@ -32,7 +32,12 @@
   },
   "type": "module",
   "scripts": {
-    "build": "babel src --out-dir dist"
+    "build": "babel src --out-dir dist",
+    "lint": "eslint src/",
+    "pretest": "cd test/fixtures && npx styleguidist build --config styleguide.config.cjs 2>/dev/null || true",
+    "test": "cross-env NODE_ENV=test NODE_OPTIONS='--loader=./test/loader.js' jasmine --config=./test/jasmine.json",
+    "test:env": "cross-env NODE_ENV=test NODE_OPTIONS='--loader=./test/loader.js'",
+    "test:coverage": "nyc npm test"
   },
   "@percy/cli": {
     "commands": [
@@ -51,6 +56,26 @@
   "devDependencies": {
     "@babel/cli": "^7.26.0",
     "@babel/core": "^7.26.0",
-    "@babel/preset-env": "^7.26.0"
+    "@babel/eslint-parser": "^7.28.6",
+    "@babel/eslint-plugin": "^7.27.1",
+    "@babel/preset-env": "^7.26.0",
+    "@babel/preset-react": "^7.25.9",
+    "@percy/cli": "^1.31.0",
+    "@percy/cli-command": "^1.31.0",
+    "@percy/core": "^1.31.0",
+    "babel-loader": "^9.2.1",
+    "babel-plugin-istanbul": "^8.0.0",
+    "cross-env": "^7.0.3",
+    "eslint": "^8.57.1",
+    "eslint-config-standard": "^17.1.0",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-n": "^16.6.2",
+    "eslint-plugin-promise": "^6.6.0",
+    "jasmine": "^4.5.0",
+    "nyc": "^17.1.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-styleguidist": "^13.1.0",
+    "webpack": "^5.97.0"
   }
 }

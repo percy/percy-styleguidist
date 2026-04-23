@@ -1,0 +1,5 @@
+Skip component:
+
+```jsx
+<Skip />
+```

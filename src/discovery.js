@@ -51,6 +51,9 @@ function flattenSections(sections, configDir, log, depth = 0) {
   return components;
 }
 
+// Exported for testing
+export { flattenSections, readPercyConfig, nameFromFilepath };
+
 export function discoverComponents(configPath, log) {
   let config = getConfig(configPath);
   let sections = getSections(config);

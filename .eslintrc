@@ -1,0 +1,31 @@
+parser: '@babel/eslint-parser'
+parserOptions:
+  requireConfigFile: false
+extends: standard
+plugins:
+  - '@babel/eslint-plugin'
+rules:
+  prefer-const: off
+  no-unused-expressions: off
+  promise/param-names: off
+  multiline-ternary: off
+  semi: [error, always]
+  yield-star-spacing: [error, after]
+  generator-star-spacing:
+    - error
+    - before: false
+      after: false
+      named: after
+  space-before-function-paren:
+    - error
+    - anonymous: never
+      asyncArrow: always
+      named: never
+
+overrides:
+  - files: ['*.cjs']
+    parserOptions:
+      sourceType: script
+      requireConfigFile: false
+    env:
+      commonjs: true

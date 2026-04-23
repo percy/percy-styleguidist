@@ -1,0 +1,7 @@
+{
+  "percy": {
+    "additionalSnapshots": [
+      { "name": "Custom BadExec Name", "execute": "throw new Error('intentional test error')" }
+    ]
+  }
+}

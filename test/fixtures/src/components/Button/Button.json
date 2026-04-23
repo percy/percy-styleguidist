@@ -1,0 +1,10 @@
+{
+  "percy": {
+    "widths": [375, 1280],
+    "additionalSnapshots": [
+      { "suffix": " - Mobile", "widths": [375] },
+      { "suffix": " - Modified", "execute": "document.querySelector('.btn').textContent = 'Modified'" },
+      { "prefix": "Prefixed " }
+    ]
+  }
+}

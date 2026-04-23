@@ -11,6 +11,7 @@ export function getConfig(configPath) {
   try {
     projectRequire.resolve('react-styleguidist/package.json');
   } catch (e) {
+    /* istanbul ignore next: cannot test without uninstalling react-styleguidist */
     throw new Error(
       '@percy/styleguidist requires react-styleguidist.\n' +
       'Install it: npm install --save-dev react-styleguidist'

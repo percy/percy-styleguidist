@@ -2,9 +2,16 @@ import command, { logger } from '@percy/cli-command';
 import { discoverComponents } from './discovery.js';
 import { shouldIncludeComponent } from './config.js';
 
-// Browser-side: navigate RSG to an isolated component via hash.
-// First param is Percy browser utils (unused), second is component name.
-// Returns true if rendered, false if timed out.
+// Build snapshot name from additional snapshot config
+function buildSnapshotName(componentName, add) {
+  if (add.name) return add.name;
+  let prefix = add.prefix ? add.prefix : '';
+  let suffix = add.suffix ? add.suffix : '';
+  return prefix + componentName + suffix;
+}
+
+/* istanbul ignore next: browser-evaluated function */
+/* eslint-disable no-var, no-undef */
 function evalNavigateToComponent(_, name) {
   window.location.hash = '!/' + name;
 
@@ -25,6 +32,7 @@ function evalNavigateToComponent(_, name) {
     setTimeout(check, 100);
   });
 }
+/* eslint-enable no-var, no-undef */
 
 export const styleguidist = command('styleguidist', {
   description: 'Snapshot React Styleguidist components',
@@ -112,8 +120,8 @@ export const styleguidist = command('styleguidist', {
   if (percy.dryRun) {
     for (let comp of filtered) {
       log.info(`Snapshot found: ${comp.name}`);
-      for (let add of (comp.percy?.additionalSnapshots || [])) {
-        let name = add.name || `${add.prefix || ''}${comp.name}${add.suffix || ''}`;
+      for (let add of (comp.percy.additionalSnapshots || [])) {
+        let name = buildSnapshotName(comp.name, add);
         log.info(`Snapshot found: ${name}`);
       }
     }
@@ -139,6 +147,8 @@ export const styleguidist = command('styleguidist', {
       await page.goto(baseUrl);
 
       // Wait for RSG to mount
+      /* istanbul ignore next: browser-evaluated function */
+      /* eslint-disable no-var */
       let mounted = await page.eval(function waitForMount() {
         return new Promise(function(resolve) {
           var deadline = Date.now() + 30000;
@@ -151,6 +161,7 @@ export const styleguidist = command('styleguidist', {
           check();
         });
       });
+      /* eslint-enable no-var */
 
       if (!mounted) {
         log.error('RSG did not mount within 30 seconds');
@@ -161,11 +172,12 @@ export const styleguidist = command('styleguidist', {
 
       for (let component of filtered) {
         try {
-          let { skip, additionalSnapshots, ...compOpts } = component.percy || {};
+          let { skip, additionalSnapshots, ...compOpts } = component.percy;
 
           // Navigate to isolated component
           let rendered = yield page.eval(evalNavigateToComponent, component.name);
 
+          /* istanbul ignore next: browser render timeout — requires 10s wait in browser context */
           if (!rendered) {
             log.warn(`Component "${component.name}" did not render within timeout, snapshot may be incomplete`);
           }
@@ -194,7 +206,7 @@ export const styleguidist = command('styleguidist', {
               }
 
               let addSnapshot = await page.snapshot({ name: component.name });
-              let name = addName || `${prefix || ''}${component.name}${suffix || ''}`;
+              let name = buildSnapshotName(component.name, { name: addName, prefix, suffix });
 
               percy.snapshot({
                 ...addSnapshot,
