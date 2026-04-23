@@ -1,6 +1,8 @@
 import command, { logger } from '@percy/cli-command';
 import { discoverComponents } from './discovery.js';
 import { shouldIncludeComponent } from './config.js';
+import { getTurboSnapFilter } from './turbosnap.js';
+import { getConfig } from './rsg-adapter.js';
 
 // Build snapshot name from additional snapshot config
 function buildSnapshotName(componentName, add) {
@@ -98,8 +100,38 @@ export const styleguidist = command('styleguidist', {
 
   log.info(`Discovered ${components.length} component(s)`);
 
+  // TurboSnap — narrow components based on which ones are affected by
+  // the diff between HEAD and the baseline commit. Runs BEFORE the
+  // include/exclude filter so include/exclude can narrow further.
+  // Skipped entirely in dry-run mode (no git diff, no API call, no RSG build).
+  let turboSnapComponents = components;
+  if (!percy.dryRun) {
+    try {
+      let rsgConfig = getConfig(flags.config);
+      let turboSnapSet = await getTurboSnapFilter({
+        percy,
+        rsgConfig,
+        components,
+        log
+      });
+      if (turboSnapSet !== null) {
+        turboSnapComponents = components.filter(c =>
+          c.filepath && turboSnapSet.has(c.filepath.toLowerCase())
+        );
+        if (turboSnapComponents.length === 0) {
+          log.info('TurboSnap: No components affected by changes, nothing to snapshot');
+          return;
+        }
+      }
+    } catch (err) {
+      // TurboSnap must never block the build — fall back to full snapshot.
+      log.debug(`TurboSnap: unexpected error (${err.message}), snapshotting all`);
+      turboSnapComponents = components;
+    }
+  }
+
   // Single filter pass: CLI include/exclude + skip from JSON sidecar
-  let filtered = components.filter(c => {
+  let filtered = turboSnapComponents.filter(c => {
     if (c.percy?.skip) {
       log.debug(`Skipping: ${c.name} (skip: true in ${c.name}.json)`);
       return false;
