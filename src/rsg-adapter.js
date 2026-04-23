@@ -24,3 +24,10 @@ export function getConfig(configPath) {
 export function getSections(config) {
   return projectRequire('react-styleguidist/lib/loaders/utils/getSections').default(config.sections, config);
 }
+
+// Invoke RSG's programmatic build. Signature (verified in
+// react-styleguidist/lib/scripts/build.js): build(config, callback)
+// where callback(err, stats).
+export function rsgBuild(rsgConfig, callback) {
+  return projectRequire('react-styleguidist/lib/scripts/build').default(rsgConfig, callback);
+}
