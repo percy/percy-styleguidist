@@ -153,8 +153,12 @@ export async function getTurboSnapFilter({ percy, rsgConfig, components, log }, 
   }
 
   if (!changedFiles.length) {
-    log.debug('TurboSnap: No files changed since baseline, snapshotting all');
-    return null;
+    // No files changed between baseline and HEAD → no components need a fresh
+    // snapshot. Return an empty Set so the command skips the capture loop;
+    // Percy's server-side carry-forward then inherits every snapshot from the
+    // baseline build into this one. Matches Chromatic TurboSnap's behavior.
+    log.info('TurboSnap: No files changed since baseline, carrying forward all snapshots');
+    return new Set();
   }
 
   // 3. Capture webpack stats by invoking RSG's build() directly, then extract edges

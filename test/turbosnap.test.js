@@ -186,11 +186,14 @@ describe('turbosnap', () => {
       expect(log.calls.debug.join('\n')).toMatch(/git diff failed/);
     });
 
-    it('returns null + debug when git diff is empty (no changes)', async () => {
+    it('returns empty Set + info when git diff is empty (no changes → carry forward)', async () => {
       let deps = makeDeps({ execFileSync: () => '' });
       let result = await getTurboSnapFilter({ percy, rsgConfig: {}, components, log }, deps);
-      expect(result).toBeNull();
-      expect(log.calls.debug.join('\n')).toMatch(/No files changed/);
+      // Empty Set means "skip every component" — server-side carry-forward
+      // inherits the baseline's snapshots into the new build.
+      expect(result).toBeInstanceOf(Set);
+      expect(result.size).toBe(0);
+      expect(log.calls.info.join('\n')).toMatch(/carrying forward/i);
     });
 
     it('returns null + debug when RSG build() returns err', async () => {

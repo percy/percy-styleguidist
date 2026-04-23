@@ -157,7 +157,10 @@ export const styleguidist = command('styleguidist', {
         c.filepath && turboSnapSet.has(c.filepath.toLowerCase())
       );
       if (narrowed.length === 0) {
-        log.info('TurboSnap: No components affected by changes, nothing to snapshot');
+        // Zero components need capturing. Finalize the build with no snapshots;
+        // Percy's server-side carry-forward inherits every baseline snapshot
+        // into this build, so the UI still shows all components as unchanged.
+        log.info('TurboSnap: 0 components affected — carrying forward from baseline');
         yield* percy.yield.stop();
         return;
       }
