@@ -147,9 +147,14 @@ describe('turbosnap', () => {
 
     beforeEach(() => {
       log = makeLog();
+      // percy.build.id is needed now that getTurboSnapFilter prefers
+      // percy.client.turbosnap() (in-process) over the HTTP hop.
+      // Tests that exercise the HTTP path set percy.client = null to
+      // force the fallback.
       percy = {
         port: 5338,
-        build: { baselineCommitSha: VALID_SHA }
+        build: { id: 'test-build-1', baselineCommitSha: VALID_SHA },
+        client: null
       };
       components = [
         { name: 'Button', filepath: 'src/components/Button/Button.js' },

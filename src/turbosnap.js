@@ -127,8 +127,12 @@ export async function httpPostJson(url, body, { timeoutMs = 30_000 } = {}) {
 export async function getTurboSnapFilter({ percy, rsgConfig, components, log }, deps = defaultDeps) {
   let { execFileSync, rsgBuild, httpPostJson: httpPost } = { ...defaultDeps, ...deps };
 
-  // 1. Baseline SHA — only present after first build in the project
-  let baselineSha = percy && percy.build && percy.build.baselineCommitSha;
+  // 1. Baseline SHA — only present after first build in the project.
+  // Dev override: `PERCY_TURBOSNAP_BASELINE_SHA=<sha>` lets local testers pin a
+  // baseline when the backend's base-build resolution is unavailable (e.g. no
+  // Sidekiq worker running locally). Must be a valid 40-char hex SHA.
+  let baselineSha = (percy && percy.build && percy.build.baselineCommitSha)
+    || process.env.PERCY_TURBOSNAP_BASELINE_SHA;
   if (!baselineSha) {
     log.debug('TurboSnap: No baseline commit available, snapshotting all');
     return null;
@@ -185,15 +189,32 @@ export async function getTurboSnapFilter({ percy, rsgConfig, components, log }, 
   //    `git diff` output directly.
   let componentFilePaths = components.map(c => c.filepath).filter(Boolean);
 
-  // 6. POST to the local @percy/core server.
-  let serverAddress = process.env.PERCY_SERVER_ADDRESS || `http://localhost:${percy.port}`;
+  // 6. Call the Percy API. Prefer the in-process client directly (no local HTTP
+  //    hop) when available — this SDK runs inside the Percy CLI process, so
+  //    going through the local server is unnecessary overhead. Falls back to
+  //    the HTTP path for older @percy/core versions or subprocess-style SDKs.
+  let buildId = percy && percy.build && percy.build.id;
+  if (!buildId) {
+    log.debug('TurboSnap: No build id available, snapshotting all');
+    return null;
+  }
 
   try {
-    let resp = await httpPost(`${serverAddress}/percy/turbosnap`, {
-      changedFiles,
-      webpackStatsGz,
-      componentFilePaths
-    }, { timeoutMs: 30_000 });
+    let resp;
+    if (percy.client && typeof percy.client.turbosnap === 'function') {
+      resp = await percy.client.turbosnap(buildId, {
+        changedFiles,
+        webpackStatsGz,
+        componentFilePaths
+      });
+    } else {
+      let serverAddress = process.env.PERCY_SERVER_ADDRESS || `http://localhost:${percy.port}`;
+      resp = await httpPost(`${serverAddress}/percy/turbosnap`, {
+        changedFiles,
+        webpackStatsGz,
+        componentFilePaths
+      }, { timeoutMs: 30_000 });
+    }
 
     let attrs = resp && resp.data && resp.data.attributes;
 

@@ -70,7 +70,10 @@ export const styleguidist = command('styleguidist', {
   ],
 
   percy: {
-    delayUploads: true
+    // delayUploads intentionally left false: TurboSnap needs percy.build.id
+    // (set by the snapshots-queue start handler) BEFORE snapshotting begins.
+    // With delayUploads:true, the start handler is deferred until first
+    // snapshot, which is too late for TurboSnap to narrow the component set.
   }
 
 }, async function*({ percy, args, flags, exit }) {
@@ -100,38 +103,10 @@ export const styleguidist = command('styleguidist', {
 
   log.info(`Discovered ${components.length} component(s)`);
 
-  // TurboSnap — narrow components based on which ones are affected by
-  // the diff between HEAD and the baseline commit. Runs BEFORE the
-  // include/exclude filter so include/exclude can narrow further.
-  // Skipped entirely in dry-run mode (no git diff, no API call, no RSG build).
-  let turboSnapComponents = components;
-  if (!percy.dryRun) {
-    try {
-      let rsgConfig = getConfig(flags.config);
-      let turboSnapSet = await getTurboSnapFilter({
-        percy,
-        rsgConfig,
-        components,
-        log
-      });
-      if (turboSnapSet !== null) {
-        turboSnapComponents = components.filter(c =>
-          c.filepath && turboSnapSet.has(c.filepath.toLowerCase())
-        );
-        if (turboSnapComponents.length === 0) {
-          log.info('TurboSnap: No components affected by changes, nothing to snapshot');
-          return;
-        }
-      }
-    } catch (err) {
-      // TurboSnap must never block the build — fall back to full snapshot.
-      log.debug(`TurboSnap: unexpected error (${err.message}), snapshotting all`);
-      turboSnapComponents = components;
-    }
-  }
-
-  // Single filter pass: CLI include/exclude + skip from JSON sidecar
-  let filtered = turboSnapComponents.filter(c => {
+  // Apply CLI include/exclude + sidecar skip filters first. Order: these
+  // compose with TurboSnap (below) — TurboSnap narrows AFTER the caller's
+  // intent filters so we never add components the user excluded.
+  let filtered = components.filter(c => {
     if (c.percy?.skip) {
       log.debug(`Skipping: ${c.name} (skip: true in ${c.name}.json)`);
       return false;
@@ -148,7 +123,7 @@ export const styleguidist = command('styleguidist', {
     return;
   }
 
-  // Dry-run mode
+  // Dry-run mode — list what would be snapshotted (no server, no TurboSnap)
   if (percy.dryRun) {
     for (let comp of filtered) {
       log.info(`Snapshot found: ${comp.name}`);
@@ -164,6 +139,34 @@ export const styleguidist = command('styleguidist', {
   // Start Percy build and launch browser.
   // Outer try/finally ensures cleanup on any failure after start.
   yield* percy.yield.start();
+
+  // TurboSnap — narrow components based on which ones are affected by the
+  // diff between HEAD and the baseline commit. Runs AFTER percy.yield.start()
+  // because it depends on percy.build.baselineCommitSha (set during build
+  // creation) and on the local @percy/core server being up for the POST.
+  try {
+    let rsgConfig = getConfig(flags.config);
+    let turboSnapSet = await getTurboSnapFilter({
+      percy,
+      rsgConfig,
+      components: filtered,
+      log
+    });
+    if (turboSnapSet !== null) {
+      let narrowed = filtered.filter(c =>
+        c.filepath && turboSnapSet.has(c.filepath.toLowerCase())
+      );
+      if (narrowed.length === 0) {
+        log.info('TurboSnap: No components affected by changes, nothing to snapshot');
+        yield* percy.yield.stop();
+        return;
+      }
+      filtered = narrowed;
+    }
+  } catch (err) {
+    // TurboSnap must never block the build — fall back to full snapshot.
+    log.debug(`TurboSnap: unexpected error (${err.message}), snapshotting all`);
+  }
 
   try {
     yield percy.browser.launch();
