@@ -152,36 +152,29 @@ export async function getTurboSnapFilter({ percy, rsgConfig, components, log }, 
     return null;
   }
 
-  if (!changedFiles.length) {
-    // No files changed between baseline and HEAD → no components need a fresh
-    // snapshot. Return an empty Set so the command skips the capture loop;
-    // Percy's server-side carry-forward then inherits every snapshot from the
-    // baseline build into this one. Matches Chromatic TurboSnap's behavior.
-    log.info('TurboSnap: No files changed since baseline, carrying forward all snapshots');
-    return new Set();
-  }
+  // 3. Capture webpack stats + gzip — only when there's a diff to analyze.
+  //    Empty diff means the server runs the carry-forward path, which doesn't
+  //    consume stats, so we skip the RSG rebuild + pako pass entirely.
+  let webpackStatsGz = null;
+  if (changedFiles.length > 0) {
+    let moduleEdges;
+    try {
+      let statsJson = await captureWebpackStats(rsgConfig, rsgBuild);
+      moduleEdges = extractModuleEdges(statsJson);
+    } catch (e) {
+      log.debug(`TurboSnap: webpack stats capture failed (${e.message}), snapshotting all`);
+      return null;
+    }
 
-  // 3. Capture webpack stats by invoking RSG's build() directly, then extract edges
-  let moduleEdges;
-  try {
-    let statsJson = await captureWebpackStats(rsgConfig, rsgBuild);
-    moduleEdges = extractModuleEdges(statsJson);
-  } catch (e) {
-    log.debug(`TurboSnap: webpack stats capture failed (${e.message}), snapshotting all`);
-    return null;
-  }
-
-  // 4. Gzip + base64 the edges payload. Pako is already available transitively
-  //    via @percy/client, matching the rest of the cli monorepo.
-  let webpackStatsGz;
-  try {
-    let pakoModule = await import('pako');
-    let Pako = pakoModule.default || pakoModule;
-    let edgesJson = JSON.stringify({ modules: moduleEdges });
-    webpackStatsGz = Buffer.from(Pako.gzip(edgesJson)).toString('base64');
-  } catch (e) {
-    log.debug(`TurboSnap: Compression failed (${e.message}), snapshotting all`);
-    return null;
+    try {
+      let pakoModule = await import('pako');
+      let Pako = pakoModule.default || pakoModule;
+      let edgesJson = JSON.stringify({ modules: moduleEdges });
+      webpackStatsGz = Buffer.from(Pako.gzip(edgesJson)).toString('base64');
+    } catch (e) {
+      log.debug(`TurboSnap: Compression failed (${e.message}), snapshotting all`);
+      return null;
+    }
   }
 
   // 5. Component file paths are already relative to rsgConfig.configDir.

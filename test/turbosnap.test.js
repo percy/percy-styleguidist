@@ -186,14 +186,29 @@ describe('turbosnap', () => {
       expect(log.calls.debug.join('\n')).toMatch(/git diff failed/);
     });
 
-    it('returns empty Set + info when git diff is empty (no changes → carry forward)', async () => {
-      let deps = makeDeps({ execFileSync: () => '' });
+    it('skips stats capture on empty diff and forwards the request for server-side handling', async () => {
+      // Empty git diff no longer short-circuits locally. Server decides what
+      // to do (carry-forward or bail); SDK sees an "0 affected" response and
+      // snapshots nothing. We assert: no RSG rebuild, no stats sent, API called.
+      let rsgBuildCalled = false;
+      let posted;
+      let deps = makeDeps({
+        execFileSync: () => '',
+        rsgBuild: (_cfg, cb) => { rsgBuildCalled = true; cb(null, {}); },
+        httpPostJson: async (_url, body) => {
+          posted = body;
+          return { data: { attributes: { 'affected-file-paths': [], bail: false } } };
+        }
+      });
+
       let result = await getTurboSnapFilter({ percy, rsgConfig: {}, components, log }, deps);
-      // Empty Set means "skip every component" — server-side carry-forward
-      // inherits the baseline's snapshots into the new build.
-      expect(result).toBeInstanceOf(Set);
+
+      expect(rsgBuildCalled).toBe(false);
+      expect(posted.changedFiles).toEqual([]);
+      expect(posted.webpackStatsGz).toBeNull();
+      // "0 components affected" → empty Set (not null), so caller skips capture.
+      expect(result instanceof Set).toBe(true);
       expect(result.size).toBe(0);
-      expect(log.calls.info.join('\n')).toMatch(/carrying forward/i);
     });
 
     it('returns null + debug when RSG build() returns err', async () => {
