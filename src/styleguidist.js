@@ -139,104 +139,111 @@ export const styleguidist = command('styleguidist', {
     let captured = 0;
     let failed = 0;
 
-    let page = yield percy.browser.page({
-      networkIdleTimeout: percy.config.discovery?.networkIdleTimeout
-    });
+    // Snapshot a single component on a given page. Captures the base snapshot
+    // plus any additionalSnapshots. Increments captured/failed; never throws.
+    async function snapshotComponent(page, component) {
+      try {
+        let { skip, additionalSnapshots, ...compOpts } = component.percy;
 
-    try {
-      await page.goto(baseUrl);
+        let rendered = await page.eval(evalNavigateToComponent, component.name);
 
-      // Wait for RSG to mount
-      /* istanbul ignore next: browser-evaluated function */
-      /* eslint-disable no-var */
-      let mounted = await page.eval(function waitForMount() {
-        return new Promise(function(resolve) {
-          var deadline = Date.now() + 30000;
-          function check() {
-            var root = document.getElementById('rsg-root');
-            if (root && root.children.length > 0) return resolve(true);
-            if (Date.now() > deadline) return resolve(false);
-            setTimeout(check, 200);
-          }
-          check();
-        });
-      });
-      /* eslint-enable no-var */
-
-      if (!mounted) {
-        log.error('RSG did not mount within 30 seconds');
-        throw new Error('RSG mount timeout');
-      }
-
-      log.debug('RSG mounted successfully');
-
-      for (let component of filtered) {
-        try {
-          let { skip, additionalSnapshots, ...compOpts } = component.percy;
-
-          // Navigate to isolated component
-          let rendered = yield page.eval(evalNavigateToComponent, component.name);
-
-          /* istanbul ignore next: browser render timeout — requires 10s wait in browser context */
-          if (!rendered) {
-            log.warn(`Component "${component.name}" did not render within timeout, skipping`);
-            failed++;
-            continue;
-          }
-
-          // Capture base snapshot
-          let snapshot = await page.snapshot({ name: component.name });
-
-          percy.snapshot({
-            ...snapshot,
-            ...compOpts,
-            name: component.name,
-            url: `${baseUrl}?id=${component.slug}`
-          });
-
-          captured++;
-          log.debug(`Captured: ${component.name}`);
-
-          // Process additional snapshots
-          for (let additional of (additionalSnapshots || [])) {
-            try {
-              let { prefix, suffix, name: addName, execute, ...addOpts } = additional;
-
-              if (execute) {
-                await page.eval(execute);
-                await new Promise(r => setTimeout(r, 500));
-              }
-
-              let addSnapshot = await page.snapshot({ name: component.name });
-              let name = buildSnapshotName(component.name, { name: addName, prefix, suffix });
-
-              percy.snapshot({
-                ...addSnapshot,
-                ...compOpts,
-                ...addOpts,
-                name,
-                url: `${baseUrl}?id=${component.slug}-${encodeURIComponent(name)}`
-              });
-
-              captured++;
-              log.debug(`Captured additional: ${name}`);
-
-              if (execute) {
-                yield page.eval(evalNavigateToComponent, component.name);
-              }
-            } catch (err) {
-              log.error(`Failed additional "${component.name}": ${err.message || err}`);
-              failed++;
-            }
-          }
-        } catch (err) {
-          log.error(`Failed "${component.name}": ${err.message || err}`);
+        /* istanbul ignore next: browser render timeout — requires 10s wait in browser context */
+        if (!rendered) {
+          log.warn(`Component "${component.name}" did not render within timeout, skipping`);
           failed++;
+          return;
         }
+
+        let snapshot = await page.snapshot({ name: component.name });
+
+        percy.snapshot({
+          ...snapshot,
+          ...compOpts,
+          name: component.name,
+          url: `${baseUrl}?id=${component.slug}`
+        });
+
+        captured++;
+        log.debug(`Captured: ${component.name}`);
+
+        for (let additional of (additionalSnapshots || [])) {
+          try {
+            let { prefix, suffix, name: addName, ...addOpts } = additional;
+            // `execute` is intentionally stripped at sidecar-read time
+            // (src/discovery.js); see docs/solutions/.
+            let name = buildSnapshotName(component.name, { name: addName, prefix, suffix });
+            let addSnapshot = await page.snapshot({ name });
+
+            percy.snapshot({
+              ...addSnapshot,
+              ...compOpts,
+              ...addOpts,
+              name,
+              url: `${baseUrl}?id=${component.slug}-${encodeURIComponent(name)}`
+            });
+
+            captured++;
+            log.debug(`Captured additional: ${name}`);
+          } catch (err) {
+            log.error(`Failed additional "${component.name}": ${err.message || err}`);
+            failed++;
+          }
+        }
+      } catch (err) {
+        log.error(`Failed "${component.name}": ${err.message || err}`);
+        failed++;
       }
-    } finally {
-      await page?.close();
     }
+
+    // Worker: opens its own page, waits for RSG mount, drains the shared queue.
+    let queue = filtered.slice();
+    async function worker() {
+      let page = await percy.browser.page({
+        networkIdleTimeout: percy.config.discovery?.networkIdleTimeout
+      });
+      try {
+        await page.goto(baseUrl);
+
+        /* istanbul ignore next: browser-evaluated function */
+        /* eslint-disable no-var */
+        let mounted = await page.eval(function waitForMount() {
+          return new Promise(function(resolve) {
+            var deadline = Date.now() + 30000;
+            function check() {
+              var root = document.getElementById('rsg-root');
+              if (root && root.children.length > 0) return resolve(true);
+              if (Date.now() > deadline) return resolve(false);
+              setTimeout(check, 200);
+            }
+            check();
+          });
+        });
+        /* eslint-enable no-var */
+
+        if (!mounted) {
+          log.error('RSG did not mount within 30 seconds');
+          throw new Error('RSG mount timeout');
+        }
+
+        while (queue.length) {
+          await snapshotComponent(page, queue.shift());
+        }
+      } finally {
+        await page?.close();
+      }
+    }
+
+    // Honor Percy's discovery concurrency knob; cap at filtered.length so we
+    // don't spawn idle workers for tiny styleguides.
+    let concurrency = Math.min(
+      percy.config.discovery?.concurrency ?? 5,
+      filtered.length
+    );
+    log.debug(`Snapshotting with concurrency=${concurrency}`);
+
+    await Promise.all(
+      Array.from({ length: concurrency }, () => worker())
+    );
 
     log.info(`Done: ${captured} captured, ${failed} failed`);
     if (failed > 0) throw new Error(`${failed} component(s) failed to capture`);

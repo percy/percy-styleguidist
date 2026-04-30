@@ -300,6 +300,51 @@ describe('percy styleguidist', () => {
       ]));
     });
 
+    it('continues capturing after an additional snapshot upload fails (Error)', async () => {
+      let { Percy } = await import('@percy/core');
+      let original = Percy.prototype.snapshot;
+      spyOn(Percy.prototype, 'snapshot').and.callFake(function(opts, ...rest) {
+        // Throw only for the "Modified" additional. Base + other additionals
+        // for the same component should still capture.
+        if (opts && opts.name === 'Button - Modified') {
+          throw new Error('additional upload failed');
+        }
+        return original.call(this, opts, ...rest);
+      });
+
+      await expectAsync(
+        styleguidist([BUILD_DIR, `--config=${CONFIG_PATH}`, '--include=Button'])
+      ).toBeRejectedWithError(/component\(s\) failed to capture/);
+
+      expect(logger.stderr).toEqual(jasmine.arrayContaining([
+        jasmine.stringMatching('Failed additional.*Button.*additional upload failed')
+      ]));
+      // Base snapshot and a non-failing additional should still appear
+      expect(logger.stdout).toEqual(jasmine.arrayContaining([
+        jasmine.stringMatching('Snapshot taken: Button'),
+        jasmine.stringMatching('Snapshot taken: Prefixed Button')
+      ]));
+    });
+
+    it('continues capturing after an additional snapshot upload fails (string)', async () => {
+      let { Percy } = await import('@percy/core');
+      let original = Percy.prototype.snapshot;
+      spyOn(Percy.prototype, 'snapshot').and.callFake(function(opts, ...rest) {
+        if (opts && opts.name === 'Button - Modified') {
+          throw 'plain string failure';
+        }
+        return original.call(this, opts, ...rest);
+      });
+
+      await expectAsync(
+        styleguidist([BUILD_DIR, `--config=${CONFIG_PATH}`, '--include=Button'])
+      ).toBeRejectedWithError(/component\(s\) failed to capture/);
+
+      expect(logger.stderr).toEqual(jasmine.arrayContaining([
+        jasmine.stringMatching('Failed additional.*Button.*plain string failure')
+      ]));
+    });
+
     it('rejects with non-zero exit when a snapshot fails (string error)', async () => {
       let { Percy } = await import('@percy/core');
       let original = Percy.prototype.snapshot;
