@@ -266,21 +266,22 @@ describe('percy styleguidist', () => {
       ]));
     });
 
-    it('handles additional snapshot execute error and continues', async () => {
+    it('strips execute from JSON sidecars and warns', async () => {
       await styleguidist([BUILD_DIR, `--config=${CONFIG_PATH}`, '--include=BadExec']);
 
-      // BadExec has execute: "throw new Error('intentional test error')"
+      // BadExec.json declares an `execute` string; it must be stripped at read
+      // time and a warning must be emitted. Base + additional are still captured.
       expect(logger.stderr).toEqual(jasmine.arrayContaining([
-        jasmine.stringMatching('Failed additional.*BadExec')
+        jasmine.stringMatching('Ignoring "execute" in .*BadExec\\.json')
       ]));
 
-      // Base snapshot should still be captured
       expect(logger.stdout).toEqual(jasmine.arrayContaining([
-        jasmine.stringMatching('Snapshot taken: BadExec')
+        jasmine.stringMatching('Snapshot taken: BadExec'),
+        jasmine.stringMatching('Snapshot taken: Custom BadExec Name')
       ]));
     });
 
-    it('handles main snapshot failure with Error object', async () => {
+    it('rejects with non-zero exit when a snapshot fails (Error object)', async () => {
       let { Percy } = await import('@percy/core');
       let original = Percy.prototype.snapshot;
       let callCount = 0;
@@ -290,14 +291,16 @@ describe('percy styleguidist', () => {
         return original.apply(this, args);
       });
 
-      await styleguidist([BUILD_DIR, `--config=${CONFIG_PATH}`]);
+      await expectAsync(
+        styleguidist([BUILD_DIR, `--config=${CONFIG_PATH}`])
+      ).toBeRejectedWithError(/component\(s\) failed to capture/);
 
       expect(logger.stderr).toEqual(jasmine.arrayContaining([
         jasmine.stringMatching('Failed.*Snapshot failed')
       ]));
     });
 
-    it('handles main snapshot failure with string error', async () => {
+    it('rejects with non-zero exit when a snapshot fails (string error)', async () => {
       let { Percy } = await import('@percy/core');
       let original = Percy.prototype.snapshot;
       let callCount = 0;
@@ -307,7 +310,9 @@ describe('percy styleguidist', () => {
         return original.apply(this, args);
       });
 
-      await styleguidist([BUILD_DIR, `--config=${CONFIG_PATH}`]);
+      await expectAsync(
+        styleguidist([BUILD_DIR, `--config=${CONFIG_PATH}`])
+      ).toBeRejectedWithError(/component\(s\) failed to capture/);
 
       expect(logger.stderr).toEqual(jasmine.arrayContaining([
         jasmine.stringMatching('Failed.*string error')

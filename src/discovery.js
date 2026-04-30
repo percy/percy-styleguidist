@@ -17,7 +17,16 @@ function readPercyConfig(filepath, configDir, log) {
   try {
     if (fs.existsSync(jsonPath)) {
       let meta = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
-      return meta.percy || {};
+      let percy = meta.percy || {};
+      // Strip `execute` from JSON sidecars. JSON files are not reviewed like JS,
+      // so allowing arbitrary `page.eval` strings here is a supply-chain risk.
+      if (Array.isArray(percy.additionalSnapshots)) {
+        percy.additionalSnapshots = percy.additionalSnapshots.map(({ execute, ...rest }) => {
+          if (execute && log) log.warn(`Ignoring "execute" in ${jsonPath} — not allowed in JSON sidecars`);
+          return rest;
+        });
+      }
+      return percy;
     }
   } catch (e) {
     if (log) log.warn(`Failed to parse percy config from ${jsonPath}: ${e.message}`);

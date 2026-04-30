@@ -88,7 +88,7 @@ export const styleguidist = command('styleguidist', {
     components = discoverComponents(flags.config, log);
   } catch (err) {
     log.error(`Component discovery failed: ${err.message}`);
-    exit(1, err.message);
+    throw err;
   }
 
   if (!components.length) {
@@ -165,7 +165,7 @@ export const styleguidist = command('styleguidist', {
 
       if (!mounted) {
         log.error('RSG did not mount within 30 seconds');
-        exit(1, 'RSG mount timeout');
+        throw new Error('RSG mount timeout');
       }
 
       log.debug('RSG mounted successfully');
@@ -179,7 +179,9 @@ export const styleguidist = command('styleguidist', {
 
           /* istanbul ignore next: browser render timeout — requires 10s wait in browser context */
           if (!rendered) {
-            log.warn(`Component "${component.name}" did not render within timeout, snapshot may be incomplete`);
+            log.warn(`Component "${component.name}" did not render within timeout, skipping`);
+            failed++;
+            continue;
           }
 
           // Capture base snapshot
@@ -237,6 +239,7 @@ export const styleguidist = command('styleguidist', {
     }
 
     log.info(`Done: ${captured} captured, ${failed} failed`);
+    if (failed > 0) throw new Error(`${failed} component(s) failed to capture`);
   } finally {
     // Always finalize Percy build and close server, even on errors
     yield* percy.yield.stop();
