@@ -24,9 +24,19 @@ jobs:
     if: (github.actor != 'dependabot[bot]')
     steps:
       - uses: actions/checkout@v4
-      - run: semgrep ci --sarif --output=semgrep.sarif
+      # Run scan but don't block CI on findings — until Code Scanning is
+      # enabled on the repo we can't triage findings interactively, and the
+      # SARIF artifact below preserves them for offline review.
+      - run: semgrep ci --sarif --output=semgrep.sarif || true
         env:
           SEMGREP_RULES: p/default
+      - name: Upload SARIF as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-sarif
+          path: semgrep.sarif
+          if-no-files-found: warn
+        if: always()
       - name: Upload SARIF file for GitHub Advanced Security Dashboard
         uses: github/codeql-action/upload-sarif@v3
         with:
