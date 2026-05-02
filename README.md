@@ -1,4 +1,4 @@
-# @percy/storybook
+# @percy/styleguidist
 [![Version](https://img.shields.io/npm/v/@percy/styleguidist.svg)](https://npmjs.org/package/@percy/styleguidist)
 
 [Percy](https://percy.io) visual testing for [React Styleguidist](https://react-styleguidist.js.org/) components.
@@ -74,7 +74,7 @@ src/components/Button/
     ],
     "additionalSnapshots": [
       { "suffix": " - Mobile", "widths": [375] },
-      { "suffix": " - Dark", "execute": "document.body.classList.add('dark')" }
+      { "prefix": "Tablet ", "widths": [768] }
     ]
   }
 }
@@ -104,8 +104,14 @@ src/components/Button/
 | `name` | string | Full snapshot name (overrides prefix/suffix) |
 | `prefix` | string | Prefix added to component name |
 | `suffix` | string | Suffix added to component name |
-| `execute` | string | JS to run before capturing (change component state) |
 | `widths` | int[] | Override widths for this snapshot |
 | `percyCSS` | string | Override CSS for this snapshot |
+
+> **Note:** `execute` (arbitrary JavaScript run in the snapshot browser) is
+> intentionally **not** supported via JSON sidecars. JSON files are typically
+> not reviewed as carefully as JS, so accepting executable strings there
+> would let any contributor land code that runs in your CI's headless
+> browser. Use `.percy.yml` or the Percy programmatic API for cases that
+> need to mutate component state before capture.
 
 Components without a `.json` file use global Percy defaults from `.percy.yml`.
