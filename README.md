@@ -28,6 +28,13 @@ Or with a running dev server:
 percy styleguidist http://localhost:6060
 ```
 
+Or run the dev server **and** Percy in one step:
+
+```bash
+export PERCY_TOKEN="your-token"
+percy styleguidist-start --port 6060
+```
+
 ## Commands
 
 ### `percy styleguidist`
@@ -120,3 +127,40 @@ src/components/Button/
 > the Percy programmatic API.
 
 Components without a `.json` file use global Percy defaults from `.percy.yml`.
+
+## Programmatic API
+
+For custom orchestration (combining with other Percy plugins, filtering by
+git diff, integrating with a test runner), drive captures from JS:
+
+```js
+import { Percy } from '@percy/core';
+import { takeStyleguidistSnapshots } from '@percy/styleguidist';
+
+const percy = new Percy({ delayUploads: true });
+await percy.start();
+
+try {
+  const result = await takeStyleguidistSnapshots(percy, {
+    baseUrl: 'http://localhost:6060',
+    configPath: './styleguide.config.cjs',
+    include: ['Button*'],
+    exclude: ['Internal*']
+  });
+  console.log(`Captured ${result.captured}/${result.total}`);
+} finally {
+  await percy.stop();
+}
+```
+
+`takeStyleguidistSnapshots(percy, opts)` returns `{ captured, failed, total }`.
+It does not throw on per-component failures — your code decides whether to
+fail the build based on the counters.
+
+Options:
+- `baseUrl` *(required)* — Styleguidist URL
+- `configPath` *(optional)* — path to `styleguide.config.js`
+- `include` / `exclude` *(optional)* — arrays of patterns
+- `components` *(optional)* — pre-discovered components; skips internal
+  discovery + filtering
+- `log` *(optional)* — logger with `warn`/`error`/`debug` methods

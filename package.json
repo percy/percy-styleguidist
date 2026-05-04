@@ -27,7 +27,8 @@
   },
   "files": [
     "dist",
-    "src"
+    "src",
+    "bin"
   ],
   "main": "./dist/index.js",
   "exports": {
@@ -42,12 +43,16 @@
     "test": "cross-env NODE_ENV=test NODE_OPTIONS='--loader=./test/loader.js' jasmine --config=./test/jasmine.json",
     "test:env": "cross-env NODE_ENV=test NODE_OPTIONS='--loader=./test/loader.js'",
     "test:coverage": "nyc npm test",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "postinstall": "node bin/postinstall.cjs || true"
   },
   "@percy/cli": {
     "commands": [
       "./dist/styleguidist.js"
     ]
+  },
+  "dependencies": {
+    "cross-spawn": "^7.0.6"
   },
   "peerDependencies": {
     "@percy/cli": "^1.31.0",

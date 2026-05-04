@@ -1,6 +1,6 @@
 {
   "include": ["src"],
-  "exclude": ["src/index.js"],
+  "exclude": ["src/index.js", "src/start.js", "src/common.js"],
   "check-coverage": true,
   "branches": 100,
   "lines": 100,

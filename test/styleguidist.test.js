@@ -735,4 +735,69 @@ describe('percy styleguidist', () => {
       expect(components).toEqual([]);
     });
   });
+
+  // --- Programmatic API ---
+
+  describe('takeStyleguidistSnapshots (programmatic)', () => {
+    let takeStyleguidistSnapshots;
+
+    beforeAll(async () => {
+      ({ takeStyleguidistSnapshots } = await import('../src/snapshots.js'));
+    });
+
+    function makeMockPercy() {
+      let snapshots = [];
+      let mockPercy = {
+        config: {},
+        browser: {
+          launch: () => Promise.resolve(),
+          page: () => Promise.resolve({
+            goto: () => Promise.resolve(),
+            eval: () => Promise.resolve(true),
+            snapshot: async ({ name }) => ({ name, dom: '<html></html>', resources: [] }),
+            close: () => Promise.resolve()
+          })
+        },
+        snapshot: (opts) => { snapshots.push(opts); }
+      };
+      return { mockPercy, snapshots };
+    }
+
+    it('discovers and filters from configPath when components not provided', async () => {
+      let { mockPercy, snapshots } = makeMockPercy();
+
+      let result = await takeStyleguidistSnapshots(mockPercy, {
+        baseUrl: 'http://localhost:9999',
+        configPath: CONFIG_PATH,
+        include: ['Button']
+      });
+
+      expect(result.total).toBe(1);
+      expect(result.captured).toBeGreaterThan(0);
+      expect(result.failed).toBe(0);
+      // Base + surviving additionalSnapshots all carry the Button base name
+      expect(snapshots.some(s => s.name === 'Button')).toBe(true);
+    });
+
+    it('returns zero-counts when filter excludes everything', async () => {
+      let { mockPercy, snapshots } = makeMockPercy();
+
+      let result = await takeStyleguidistSnapshots(mockPercy, {
+        baseUrl: 'http://localhost:9999',
+        configPath: CONFIG_PATH,
+        include: ['DoesNotExist']
+      });
+
+      expect(result).toEqual({ captured: 0, failed: 0, total: 0 });
+      expect(snapshots).toEqual([]);
+    });
+
+    it('throws if baseUrl is missing (also exercises default opts)', async () => {
+      let { mockPercy } = makeMockPercy();
+      // Called without opts → opts defaults to {} → baseUrl undefined → throws
+      await expectAsync(
+        takeStyleguidistSnapshots(mockPercy)
+      ).toBeRejectedWithError(/baseUrl is required/);
+    });
+  });
 });

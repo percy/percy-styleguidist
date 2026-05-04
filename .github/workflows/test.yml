@@ -8,12 +8,24 @@ on:
   workflow_dispatch:
 jobs:
   test:
-    name: Test
+    name: Test (node ${{ matrix.node }}${{ matrix.rsg-label && format(', rsg {0}', matrix.rsg-label) || '' }})
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest]
         node: [18, 20, 22]
+        # Default jobs (3) test against the RSG version pinned in devDependencies (currently ^13).
+        # The `include` block adds advisory jobs that test additional peer-dep major versions.
+        # `continue-on-error: true` is set per-job below so RSG-12 breakage surfaces as a
+        # warning rather than a failure — narrow `peerDependencies.react-styleguidist` if
+        # those jobs go consistently red.
+        include:
+          - os: ubuntu-latest
+            node: 22
+            rsg: '^12.0.0'
+            rsg-label: '12'
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.rsg != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,11 +34,14 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: node_modules
-          key: ${{ runner.os }}/node-${{ matrix.node }}/${{ hashFiles('**/package-lock.json') }}
-          restore-keys: ${{ runner.os }}/node-${{ matrix.node }}/
+          key: ${{ runner.os }}/node-${{ matrix.node }}/rsg-${{ matrix.rsg-label || 'default' }}/${{ hashFiles('**/package-lock.json') }}
+          restore-keys: ${{ runner.os }}/node-${{ matrix.node }}/rsg-${{ matrix.rsg-label || 'default' }}/
       - run: npm install
         env:
           PERCY_POSTINSTALL_BROWSER: true
+      - name: Override react-styleguidist to ${{ matrix.rsg }}
+        if: matrix.rsg != ''
+        run: npm install --no-save react-styleguidist@${{ matrix.rsg }}
       - run: npm run build
       # Download Chromium before tests — tests run in a mock environment
       # that intercepts HTTP requests, so Chromium must be pre-installed
