@@ -195,13 +195,20 @@ export const styleguidist = command('styleguidist', {
       }
     }
 
-    // Worker: opens its own page, waits for RSG mount, drains the shared queue.
+    // Cooperative cancellation: the first worker to throw sets `aborted`
+    // and stores the error. Sibling workers see the flag and stop draining,
+    // so an early failure doesn't leave orphan pages running while the outer
+    // finally tries to close the Percy build.
+    let aborted = false;
+    let firstErr;
+
     let queue = filtered.slice();
     async function worker() {
-      let page = await percy.browser.page({
-        networkIdleTimeout: percy.config.discovery?.networkIdleTimeout
-      });
+      let page;
       try {
+        page = await percy.browser.page({
+          networkIdleTimeout: percy.config.discovery?.networkIdleTimeout
+        });
         await page.goto(baseUrl);
 
         /* istanbul ignore next: browser-evaluated function */
@@ -225,18 +232,24 @@ export const styleguidist = command('styleguidist', {
           throw new Error('RSG mount timeout');
         }
 
-        while (queue.length) {
+        // eslint-disable-next-line no-unmodified-loop-condition
+        while (!aborted && queue.length) {
           await snapshotComponent(page, queue.shift());
         }
+      } catch (err) {
+        aborted = true;
+        firstErr = firstErr || err;
       } finally {
-        await page?.close();
+        /* istanbul ignore next: defensive — page.close errors during teardown shouldn't mask the real failure */
+        try { await page?.close(); } catch { /* swallow */ }
       }
     }
 
-    // Honor Percy's discovery concurrency knob; cap at filtered.length so we
+    // Honor a dedicated `styleguidist.concurrency` knob, falling back to
+    // Percy's discovery concurrency, then 5. Cap at filtered.length so we
     // don't spawn idle workers for tiny styleguides.
     let concurrency = Math.min(
-      percy.config.discovery?.concurrency ?? 5,
+      percy.config.styleguidist?.concurrency ?? percy.config.discovery?.concurrency ?? 5,
       filtered.length
     );
     log.debug(`Snapshotting with concurrency=${concurrency}`);
@@ -244,6 +257,8 @@ export const styleguidist = command('styleguidist', {
     await Promise.all(
       Array.from({ length: concurrency }, () => worker())
     );
+
+    if (firstErr) throw firstErr;
 
     log.info(`Done: ${captured} captured, ${failed} failed`);
     if (failed > 0) throw new Error(`${failed} component(s) failed to capture`);

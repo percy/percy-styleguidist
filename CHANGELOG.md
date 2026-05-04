@@ -16,10 +16,22 @@ Initial release of `@percy/styleguidist`.
   (default 5 parallel workers).
 
 ### Notes
-- `execute` strings in JSON sidecars are intentionally not supported; see
-  README for the rationale and alternatives.
+- JSON sidecar fields go through an **allowlist**. Code-shaped keys
+  (`execute`, `domTransformation`) and any unknown key are dropped at
+  read time with a warning. Use `.percy.yml` or the programmatic API
+  if you need to mutate component state before capture.
+- An `additionalSnapshots` entry whose only differentiator was a
+  stripped key (so it would just duplicate the base snapshot) is
+  dropped entirely with a `Dropping additionalSnapshot ...` warning.
+- Snapshot workers cooperate on cancellation: when one worker fails,
+  siblings stop draining the queue. Avoids long hangs on `RSG mount
+  timeout` against broken builds.
+- Concurrency knob precedence:
+  `percy.config.styleguidist.concurrency` → `percy.config.discovery.concurrency` → `5`.
 - Capture failures cause a non-zero exit by default. Set
   `PERCY_EXIT_WITH_ZERO_ON_ERROR=true` to opt into soft-fail behavior.
+- `prepack` rebuilds `dist/` automatically on `npm publish`/`npm pack`,
+  so a stale `dist/` cannot ship.
 
 ### Compatibility
 - Node 18+

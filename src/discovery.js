@@ -8,6 +8,37 @@ function nameFromFilepath(filepath) {
   return filename.replace(/\.\w+$/, '');
 }
 
+// JSON sidecars are not reviewed like JS — accepting arbitrary code-shaped
+// keys (execute, domTransformation) opens a supply-chain RCE on CI. Block
+// every key not on the allowlist; warn the operator so misconfigurations
+// are visible.
+const ALLOWED_COMPONENT = new Set([
+  'skip', 'widths', 'minHeight', 'percyCSS', 'enableJavaScript',
+  'scope', 'waitForSelector', 'waitForTimeout',
+  'browsers', 'regions',
+  'additionalSnapshots'
+]);
+const ALLOWED_ADDITIONAL = new Set([
+  'name', 'prefix', 'suffix',
+  'widths', 'minHeight', 'percyCSS', 'enableJavaScript',
+  'scope', 'waitForSelector', 'waitForTimeout',
+  'browsers', 'regions'
+]);
+const NAME_SHAPING = new Set(['name', 'prefix', 'suffix']);
+
+function pickAllowed(obj, allowed, jsonPath, log, where) {
+  let out = {};
+  let blocked = [];
+  for (let [k, v] of Object.entries(obj)) {
+    if (allowed.has(k)) out[k] = v;
+    else blocked.push(k);
+  }
+  for (let k of blocked) {
+    if (log) log.warn(`Ignoring "${k}" ${where} in ${jsonPath} — not allowed in JSON sidecars`);
+  }
+  return { allowed: out, blocked };
+}
+
 // Read percy config from a JSON sidecar file next to the component.
 // e.g., src/components/TodoApp/TodoApp.js → TodoApp.json
 function readPercyConfig(filepath, configDir, log) {
@@ -17,13 +48,22 @@ function readPercyConfig(filepath, configDir, log) {
   try {
     if (fs.existsSync(jsonPath)) {
       let meta = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
-      let percy = meta.percy || {};
-      // Strip `execute` from JSON sidecars. JSON files are not reviewed like JS,
-      // so allowing arbitrary `page.eval` strings here is a supply-chain risk.
+      let raw = meta.percy || {};
+      let { allowed: percy } = pickAllowed(raw, ALLOWED_COMPONENT, jsonPath, log, '');
+
       if (Array.isArray(percy.additionalSnapshots)) {
-        percy.additionalSnapshots = percy.additionalSnapshots.map(({ execute, ...rest }) => {
-          if (execute && log) log.warn(`Ignoring "execute" in ${jsonPath} — not allowed in JSON sidecars`);
-          return rest;
+        percy.additionalSnapshots = percy.additionalSnapshots.flatMap(a => {
+          /* istanbul ignore next: defensive — RSG won't produce malformed entries */
+          if (!a || typeof a !== 'object') return [];
+          let { allowed: stripped, blocked } = pickAllowed(a, ALLOWED_ADDITIONAL, jsonPath, log, 'in additionalSnapshot');
+          // If a stripped key was the only differentiator, the variant would
+          // produce an identical-to-base snapshot. Drop it loudly.
+          let hasDiff = Object.keys(stripped).some(k => !NAME_SHAPING.has(k));
+          if (blocked.length && !hasDiff) {
+            if (log) log.warn(`Dropping additionalSnapshot in ${jsonPath} — no differentiator left after stripping ${blocked.join(',')}`);
+            return [];
+          }
+          return [stripped];
         });
       }
       return percy;

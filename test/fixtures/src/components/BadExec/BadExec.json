@@ -1,7 +1,8 @@
 {
   "percy": {
     "additionalSnapshots": [
-      { "name": "Custom BadExec Name", "execute": "throw new Error('intentional test error')" }
+      { "name": "Custom BadExec Name", "widths": [800] },
+      { "suffix": " - Drops", "execute": "throw new Error('intentional test error')" }
     ]
   }
 }

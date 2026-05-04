@@ -37,7 +37,8 @@
     "pretest": "cd test/fixtures && npx styleguidist build --config styleguide.config.cjs 2>/dev/null || true",
     "test": "cross-env NODE_ENV=test NODE_OPTIONS='--loader=./test/loader.js' jasmine --config=./test/jasmine.json",
     "test:env": "cross-env NODE_ENV=test NODE_OPTIONS='--loader=./test/loader.js'",
-    "test:coverage": "nyc npm test"
+    "test:coverage": "nyc npm test",
+    "prepack": "npm run build"
   },
   "@percy/cli": {
     "commands": [

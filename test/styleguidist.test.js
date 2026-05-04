@@ -73,7 +73,7 @@ describe('percy styleguidist', () => {
       expect(logger.stdout).toEqual(jasmine.arrayContaining([
         jasmine.stringMatching('Snapshot found: Button'),
         jasmine.stringMatching('Snapshot found: Button - Mobile'),
-        jasmine.stringMatching('Snapshot found: Button - Modified')
+        jasmine.stringMatching('Snapshot found: Prefixed Button')
       ]));
     });
 
@@ -218,7 +218,7 @@ describe('percy styleguidist', () => {
       expect(logger.stdout).toEqual(jasmine.arrayContaining([
         jasmine.stringMatching('Snapshot taken: Button'),
         jasmine.stringMatching('Snapshot taken: Button - Mobile'),
-        jasmine.stringMatching('Snapshot taken: Button - Modified')
+        jasmine.stringMatching('Snapshot taken: Prefixed Button')
       ]));
     });
 
@@ -258,27 +258,42 @@ describe('percy styleguidist', () => {
       expect(lines.some(l => l.includes('Input'))).toBe(true);
     });
 
-    it('captures additional snapshots with execute JS', async () => {
+    it('drops execute-only variants and warns (Button)', async () => {
+      // Button.json's "Modified" variant is { suffix: " - Modified", execute: "..." }.
+      // After stripping `execute` it has no width/option differentiator left,
+      // so it would just duplicate the base snapshot. Drop it.
       await styleguidist([BUILD_DIR, `--config=${CONFIG_PATH}`, '--include=Button']);
 
-      expect(logger.stdout).toEqual(jasmine.arrayContaining([
-        jasmine.stringMatching('Snapshot taken: Button - Modified')
+      expect(logger.stderr).toEqual(jasmine.arrayContaining([
+        jasmine.stringMatching('Ignoring "execute" in .*Button\\.json'),
+        jasmine.stringMatching('Dropping additionalSnapshot in .*Button\\.json')
       ]));
+
+      let snapshotLines = logger.stdout.filter(l => l.includes('Snapshot taken:'));
+      expect(snapshotLines.some(l => l.includes('Button - Modified'))).toBe(false);
     });
 
-    it('strips execute from JSON sidecars and warns', async () => {
+    it('strips execute from JSON sidecars and drops execute-only variants (BadExec)', async () => {
+      // BadExec.json has two additionals:
+      //   1. { name: "Custom BadExec Name", widths: [800] } — survives (has widths)
+      //   2. { suffix: " - Drops", execute: "..." } — execute stripped, no diff
+      //                                                left, dropped with warn
       await styleguidist([BUILD_DIR, `--config=${CONFIG_PATH}`, '--include=BadExec']);
 
-      // BadExec.json declares an `execute` string; it must be stripped at read
-      // time and a warning must be emitted. Base + additional are still captured.
       expect(logger.stderr).toEqual(jasmine.arrayContaining([
-        jasmine.stringMatching('Ignoring "execute" in .*BadExec\\.json')
+        jasmine.stringMatching('Ignoring "execute" in .*BadExec\\.json'),
+        jasmine.stringMatching('Dropping additionalSnapshot in .*BadExec\\.json')
       ]));
 
+      // Base + the kept name-bearing variant should appear.
       expect(logger.stdout).toEqual(jasmine.arrayContaining([
         jasmine.stringMatching('Snapshot taken: BadExec'),
         jasmine.stringMatching('Snapshot taken: Custom BadExec Name')
       ]));
+
+      // The dropped execute-only variant must not appear.
+      let snapshotLines = logger.stdout.filter(l => l.includes('Snapshot taken:'));
+      expect(snapshotLines.some(l => l.includes('BadExec - Drops'))).toBe(false);
     });
 
     it('rejects with non-zero exit when a snapshot fails (Error object)', async () => {
@@ -304,9 +319,10 @@ describe('percy styleguidist', () => {
       let { Percy } = await import('@percy/core');
       let original = Percy.prototype.snapshot;
       spyOn(Percy.prototype, 'snapshot').and.callFake(function(opts, ...rest) {
-        // Throw only for the "Modified" additional. Base + other additionals
-        // for the same component should still capture.
-        if (opts && opts.name === 'Button - Modified') {
+        // Throw only for the "Mobile" additional (a width-only variant
+        // that survives the strip). Base and "Prefixed Button" should
+        // still capture.
+        if (opts && opts.name === 'Button - Mobile') {
           throw new Error('additional upload failed');
         }
         return original.call(this, opts, ...rest);
@@ -319,7 +335,7 @@ describe('percy styleguidist', () => {
       expect(logger.stderr).toEqual(jasmine.arrayContaining([
         jasmine.stringMatching('Failed additional.*Button.*additional upload failed')
       ]));
-      // Base snapshot and a non-failing additional should still appear
+      // Base snapshot and the non-failing additional should still appear
       expect(logger.stdout).toEqual(jasmine.arrayContaining([
         jasmine.stringMatching('Snapshot taken: Button'),
         jasmine.stringMatching('Snapshot taken: Prefixed Button')
@@ -330,7 +346,7 @@ describe('percy styleguidist', () => {
       let { Percy } = await import('@percy/core');
       let original = Percy.prototype.snapshot;
       spyOn(Percy.prototype, 'snapshot').and.callFake(function(opts, ...rest) {
-        if (opts && opts.name === 'Button - Modified') {
+        if (opts && opts.name === 'Button - Mobile') {
           throw 'plain string failure';
         }
         return original.call(this, opts, ...rest);
@@ -689,7 +705,10 @@ describe('percy styleguidist', () => {
       let button = components.find(c => c.name === 'Button');
       expect(button).toBeDefined();
       expect(button.percy.widths).toEqual([375, 1280]);
-      expect(button.percy.additionalSnapshots.length).toBe(3);
+      // Button.json has 3 additional snapshots, but " - Modified" is
+      // dropped at sidecar-read time (its only differentiator was a stripped
+      // `execute` string). 2 survive: " - Mobile" and "Prefixed ".
+      expect(button.percy.additionalSnapshots.length).toBe(2);
     });
 
     it('returns empty percy config when no JSON sidecar exists', () => {

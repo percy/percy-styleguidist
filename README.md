@@ -107,11 +107,16 @@ src/components/Button/
 | `widths` | int[] | Override widths for this snapshot |
 | `percyCSS` | string | Override CSS for this snapshot |
 
-> **Note:** `execute` (arbitrary JavaScript run in the snapshot browser) is
-> intentionally **not** supported via JSON sidecars. JSON files are typically
-> not reviewed as carefully as JS, so accepting executable strings there
-> would let any contributor land code that runs in your CI's headless
-> browser. Use `.percy.yml` or the Percy programmatic API for cases that
-> need to mutate component state before capture.
+> **Note on JSON sidecar safety:** sidecars are loaded from disk, not
+> reviewed like JS, so we **only honor an allowlist** of non-executable
+> options: the keys in the two tables above. Anything else (including
+> `execute` and `domTransformation`) is dropped at read time with a
+> warning. If an `additionalSnapshots` entry's only differentiator was a
+> stripped key (so it would just duplicate the base snapshot), the entry
+> itself is dropped with a `Dropping additionalSnapshot ...` warning.
+>
+> For state-mutating snapshots, configure `execute` in `.percy.yml` (which
+> is committed alongside JS code and reviewed) or drive captures through
+> the Percy programmatic API.
 
 Components without a `.json` file use global Percy defaults from `.percy.yml`.
