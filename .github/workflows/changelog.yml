@@ -2,6 +2,8 @@ name: Changelog
 on:
   push:
     branches: [main]
+permissions:
+  contents: write
 jobs:
   update_draft:
     runs-on: ubuntu-latest
