@@ -16,9 +16,9 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.npm
-          key: v1/${{ runner.os }}/node-20/${{ hashFiles('**/package-lock.json') }}
+          key: v1/${{ runner.os }}/node-20/${{ hashFiles('**/package.json') }}
           restore-keys: v1/${{ runner.os }}/node-20/
-      - run: npm ci
+      - run: npm install
         env:
           PERCY_POSTINSTALL_BROWSER: true
       - run: npm run build

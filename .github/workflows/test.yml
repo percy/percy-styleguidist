@@ -34,7 +34,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: node_modules
-          key: ${{ runner.os }}/node-${{ matrix.node }}/rsg-${{ matrix.rsg-label || 'default' }}/${{ hashFiles('**/package-lock.json') }}
+          key: ${{ runner.os }}/node-${{ matrix.node }}/rsg-${{ matrix.rsg-label || 'default' }}/${{ hashFiles('**/package.json') }}
           restore-keys: ${{ runner.os }}/node-${{ matrix.node }}/rsg-${{ matrix.rsg-label || 'default' }}/
       - run: npm install
         env:
