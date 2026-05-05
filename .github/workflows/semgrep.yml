@@ -23,7 +23,7 @@ jobs:
       image: returntocorp/semgrep
     if: (github.actor != 'dependabot[bot]')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       # Run scan but don't block CI on findings — until Code Scanning is
       # enabled on the repo we can't triage findings interactively, and the
       # SARIF artifact below preserves them for offline review.
