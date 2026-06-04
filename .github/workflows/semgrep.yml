@@ -38,7 +38,7 @@ jobs:
           if-no-files-found: warn
         if: always()
       - name: Upload SARIF file for GitHub Advanced Security Dashboard
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: semgrep.sarif
         # Upload only if Code Scanning is enabled on the repo. Without it
