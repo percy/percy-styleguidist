@@ -47,4 +47,7 @@ jobs:
       # that intercepts HTTP requests, so Chromium must be pre-installed
       - name: Ensure Chromium is installed
         run: node -e "import('./node_modules/@percy/core/dist/install.js').then(m => m.chromium()).then(p => console.log('Chromium:', p))"
+      - name: Build test fixtures (explicit; .npmrc ignore-scripts skips the pretest hook)
+        run: npm run pretest
+
       - run: npm run test:coverage
