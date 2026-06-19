@@ -20,7 +20,7 @@ jobs:
     name: semgrep/ci
     runs-on: ubuntu-latest
     container:
-      image: returntocorp/semgrep
+      image: returntocorp/semgrep:1.166.0
     if: (github.actor != 'dependabot[bot]')
     steps:
       - uses: actions/checkout@v4
