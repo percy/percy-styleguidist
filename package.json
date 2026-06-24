@@ -82,7 +82,7 @@
     "eslint-plugin-n": "^16.6.2",
     "eslint-plugin-promise": "^6.6.0",
     "jasmine": "^4.5.0",
-    "nyc": "^17.1.0",
+    "nyc": "^18.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-styleguidist": "^13.1.0",
