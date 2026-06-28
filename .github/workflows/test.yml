@@ -6,6 +6,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      branch:
+        description: Which branch of @percy/cli to build from source for this run
+        required: false
+        default: master
 jobs:
   test:
     name: Test (node ${{ matrix.node }}${{ matrix.rsg-label && format(', rsg {0}', matrix.rsg-label) || '' }})
@@ -49,5 +54,34 @@ jobs:
         run: node -e "import('./node_modules/@percy/core/dist/install.js').then(m => m.chromium()).then(p => console.log('Chromium:', p))"
       - name: Build test fixtures (explicit; .npmrc ignore-scripts skips the pretest hook)
         run: npm run pretest
+
+      # Optionally run the suite against an unpublished @percy/cli branch
+      # (workflow_dispatch only): build the CLI from source and link it so the
+      # mock-loader tests exercise that branch's @percy/* packages. The branch
+      # is regex-validated and passed via env (never interpolated into a shell).
+      - uses: actions-ecosystem/action-regex-match@v2
+        id: regex-match
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        with:
+          text: ${{ github.event.inputs.branch }}
+          regex: '^[a-zA-Z0-9_/\-]+$'
+      - name: Break on invalid branch name
+        if: ${{ github.event_name == 'workflow_dispatch' && steps.regex-match.outputs && steps.regex-match.outputs.match == '' }}
+        run: exit 1
+      - name: Set up @percy/cli from git
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          BRANCH: ${{ github.event.inputs.branch }}
+          WORKSPACE: ${{ github.workspace }}
+        run: |
+          cd /tmp
+          git clone --branch "$BRANCH" --depth 1 https://github.com/percy/cli
+          cd cli
+          npm install
+          npm run build
+          npm link
+          cd "$WORKSPACE"
+          npm link @percy/cli
+          npx percy --version
 
       - run: npm run test:coverage
