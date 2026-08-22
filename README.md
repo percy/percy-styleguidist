@@ -98,7 +98,17 @@ breaking the build.
 3. **A git repository** with the baseline commit present. Shallow clones that
    do not contain it fall back to a full run.
 
-4. **A base build whose commit is in your repo.** Percy picks the base build,
+4. **A comparison-based plan, and the feature enabled for your organization.**
+   IntelliStory saves *comparisons*, so on a page-count plan there is nothing to
+   save — the base build contains every component regardless. It is gated on
+   both, and a request from an organization without it comes back as `403`,
+   which degrades to a full run:
+
+   ```
+   IntelliStory: not enabled for this organization (graph generation request was not allowed); running full snapshot set
+   ```
+
+5. **A base build whose commit is in your repo.** Percy picks the base build,
    and IntelliStory diffs against its commit — so if that commit is not in the
    clone (an unrelated branch, a squashed history), the diff fails and the full
    set runs. This is the normal case for PR builds, where the base is a build on
@@ -182,8 +192,13 @@ widths where one component changed:
 | `total-comparisons-skipped-by-smartsnap` | 0 | **6** |
 
 So expect the same snapshot count in the dashboard, with the untouched ones
-showing as unchanged. `total-comparisons-skipped-by-smartsnap` is the number to
-watch to see IntelliStory working.
+grouped under **Unchanged**. `total-comparisons-skipped-by-smartsnap` is the
+number to watch to see IntelliStory working.
+
+The snapshot and comparison rows always exist because billing and the build page
+are built on comparisons existing — a skipped comparison is a terminal success
+state whose head image is the baseline's, not a missing record. What is avoided
+is the render.
 
 ### Output
 
