@@ -94,7 +94,7 @@ export const styleguidist = command('styleguidist', {
   // it only runs when there is a build to select against and a dependency graph
   // to reason about. Prepared before `percy.start()` so a missing stats file is
   // reported before any work is done.
-  let intelliStoryConfig, statsDir;
+  let intelliStoryConfig, statsDir, graphIds;
   if (percy.config.styleguidist?.intelliStory?.enabled) {
     let prepared = prepareIntelliStory({
       config: percy.config.styleguidist.intelliStory,
@@ -107,7 +107,7 @@ export const styleguidist = command('styleguidist', {
     if (prepared.skipReason) {
       log.info(prepared.skipReason);
     } else {
-      ({ intelliStoryConfig, statsDir } = prepared);
+      ({ intelliStoryConfig, statsDir, graphIds } = prepared);
       log.debug(`IntelliStory: reading the dependency graph from ${statsDir}; ` +
         `bailing on changes to ${prepared.globalPaths.length} global Styleguidist path(s)`);
     }
@@ -121,7 +121,7 @@ export const styleguidist = command('styleguidist', {
     // delayed), but the graph is keyed by the build id, so create it up front.
     if (intelliStoryConfig) {
       yield* percy.yield.startBuild();
-      filtered = yield tagComponents(percy, filtered, { intelliStoryConfig, statsDir, log });
+      filtered = yield tagComponents(percy, filtered, { intelliStoryConfig, statsDir, graphIds, log });
     }
 
     result = await takeStyleguidistSnapshots(percy, {

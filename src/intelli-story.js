@@ -77,7 +77,7 @@ export function resolveConfigFile(rsgConfig, flagConfigPath, invocationDir = pro
 // inside Storybook's `.storybook` directory does.
 //
 // Returned as absolute paths; `bailOnChanges` rebases them onto the repo root.
-export function collectGlobalPaths(rsgConfig, components = []) {
+export function collectGlobalPaths(rsgConfig, components = [], graphIds) {
   let out = new Set();
   let dir = rsgConfig?.configDir;
 
@@ -104,27 +104,61 @@ export function collectGlobalPaths(rsgConfig, components = []) {
     }
   }
 
-  // Percy JSON sidecars hold snapshot options (widths, additionalSnapshots).
-  // Styleguidist requires them from its own entry, so they sit outside the
-  // component graph too, and a change to one changes what we capture.
   for (let component of components) {
+    // Percy JSON sidecars hold snapshot options (widths, additionalSnapshots).
+    // Styleguidist requires them from its own entry, so they sit outside the
+    // component graph too, and a change to one changes what we capture.
     if (component?.metadataPath) out.add(component.metadataPath);
+
+    // Examples markdown the graph does not contain. It decides everything the
+    // component's page renders, but nothing depends on it as far as the graph
+    // is concerned, so a change to it cannot be attributed to the component —
+    // the only safe reading is "this could affect anything".
+    let examples = component?.examplesFile;
+    if (examples && !graphIds?.has(examples)) out.add(examples);
   }
 
   return [...out];
 }
 
+// Module ids present in the dependency graph, as a Set of absolute paths.
+//
+// Selection is keyed on a path the graph knows about, so we have to know which
+// paths those are before choosing an anchor. This re-reads the stats file that
+// `applyIntelliStory` will read again — wasteful on a large graph, but the
+// alternative is guessing, and guessing wrong loses comparisons silently.
+//
+// Returns an empty Set on any failure: that makes every component fall back to
+// its source and every examples file force a full run, which is the safe
+// direction. `applyIntelliStory` reports the unreadable file properly.
+export function readGraphIds(statsDir, statsFile) {
+  try {
+    let stats = JSON.parse(fs.readFileSync(path.join(statsDir, statsFile), 'utf8'));
+    return new Set((stats.modules || []).map(m => m.id).filter(id => typeof id === 'string'));
+  } catch {
+    return new Set();
+  }
+}
+
 // The file whose dependency subtree defines what a component's page renders.
 //
-// This is the examples markdown, not the component source. Styleguidist's
-// examples-loader turns `Button.md` into a module that requires `Button.js` plus
-// everything the examples themselves import, which makes the markdown the exact
-// analogue of a Storybook `*.stories.js` entry: the whole rendered page is
-// reachable from it, including the markdown itself. Anchoring on the component
-// source instead would miss edits to the examples — the most common kind of
-// change in a styleguide — because the source does not depend on them.
-export function componentImportPath(component) {
-  return component?.examplesFile || component?.sourcePath || null;
+// Ideally this is the examples markdown: Styleguidist's examples-loader turns
+// `Button.md` into a module that requires `Button.js` plus everything the
+// examples import, which would make it the exact analogue of a Storybook
+// `*.stories.js` entry. But the Percy bundler plugin only emits modules with at
+// least one ES module import or export, and the examples-loader emits
+// CommonJS — so in practice the markdown is not a vertex, and neither is the
+// Styleguidist entry that requires it (that lives in node_modules). Anchoring
+// there would key selection on a path the graph has never heard of.
+//
+// So: anchor on the markdown when the graph actually contains it, and otherwise
+// on the component source, which is ES module and always a vertex. Markdown
+// that is not in the graph is untraceable and forces a full run instead — see
+// `collectGlobalPaths`.
+export function componentImportPath(component, graphIds) {
+  let examples = component?.examplesFile;
+  if (examples && graphIds?.has(examples)) return examples;
+  return component?.sourcePath || examples || null;
 }
 
 // Assembles the `intelliStoryConfig` handed to `applyIntelliStory`, and the
@@ -147,9 +181,11 @@ export function prepareIntelliStory({
     ? path.resolve(invocationDir, config.configFile)
     : resolveConfigFile(rsgConfig, flagConfigPath, invocationDir);
 
-  let globalPaths = collectGlobalPaths(rsgConfig, components);
+  let graphIds = readGraphIds(stats.dir, stats.file);
+  let globalPaths = collectGlobalPaths(rsgConfig, components, graphIds);
 
   return {
+    graphIds,
     statsDir: stats.dir,
     intelliStoryConfig: {
       ...config,
@@ -188,14 +224,14 @@ export async function applyIntelliStoryFilter(
 // Runs IntelliStory over the discovered components and returns them tagged with
 // what `percy.snapshot()` needs.
 export async function tagComponents(percy, components, {
-  intelliStoryConfig, statsDir, log, apply
+  intelliStoryConfig, statsDir, graphIds, log, apply
 }) {
   // `applyIntelliStory` speaks in snapshots keyed by `importPath`. One entry per
   // component is enough: a component's additional snapshots share its source, so
   // they share its selection.
   let pseudoSnapshots = components.map(c => ({
     name: c.name,
-    importPath: componentImportPath(c)
+    importPath: componentImportPath(c, graphIds)
   }));
 
   let tagged = await applyIntelliStoryFilter(

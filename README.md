@@ -72,10 +72,16 @@ breaking the build.
    to your `styleguide.config.js` `webpackConfig` so the build emits
    `enriched-stats.json`:
 
+   ```bash
+   npm install --save-dev @percy/bundler-plugin-smartsnap
+   ```
+
    ```js
+   const { webpackPlugin } = require('@percy/bundler-plugin-smartsnap');
+
    module.exports = {
      webpackConfig: {
-       plugins: [new PercySmartSnapPlugin()]
+       plugins: [webpackPlugin()]
      }
    };
    ```
@@ -91,6 +97,14 @@ breaking the build.
 
 3. **A git repository** with the baseline commit present. Shallow clones that
    do not contain it fall back to a full run.
+
+4. **A base build whose commit is in your repo.** Percy picks the base build,
+   and IntelliStory diffs against its commit — so if that commit is not in the
+   clone (an unrelated branch, a squashed history), the diff fails and the full
+   set runs. This is the normal case for PR builds, where the base is a build on
+   the target branch. It is worth knowing when the numbers look wrong: a build
+   whose base has no snapshots in common carries nothing forward and reports
+   `filtered out 0 of N`, even though the graph itself was built fine.
 
 ### Configuration
 
@@ -119,12 +133,23 @@ repository root instead.
 
 ### What anchors a component
 
-A component's "story" is its **examples markdown** (`Button.md`), not its source
-file. Styleguidist's examples-loader compiles the markdown into a module that
-imports the component and everything the examples themselves use, so the whole
-rendered page is reachable from it — which means editing the examples selects
-the component, exactly as editing the component does. Components with no
-examples file fall back to their source file.
+Selection is keyed on a file the dependency graph knows about, so each component
+is anchored on its **source file** (`Button.js`) — changes to it, and to anything
+it imports transitively, select the component precisely.
+
+Its **examples markdown** (`Button.md`) would be the better anchor in principle:
+Styleguidist's examples-loader compiles it into a module that imports the
+component plus everything the examples use, making it the exact analogue of a
+Storybook `*.stories.js` entry. But `@percy/bundler-plugin-smartsnap` only emits
+modules with at least one ES module import or export, and the examples-loader
+emits CommonJS — so the markdown is not in the graph, and neither is the
+Styleguidist entry that requires it (that lives in `node_modules`).
+
+The SDK therefore checks the graph: if the markdown *is* a vertex it anchors
+there, and otherwise anchors on the source and treats the markdown as
+untraceable — a change to it forces a full run rather than being silently
+attributed to nothing. **In practice this means doc-only changes get no
+reduction today**, and will start to once the plugin emits those modules.
 
 ### What forces a full run
 
@@ -138,6 +163,7 @@ when any of these change:
 - `styles`, `theme`, a string `template`, `styleguideComponents` targets, and
   anything under `assetsDir`
 - the per-component Percy JSON sidecars (they decide *what* gets captured)
+- examples markdown the dependency graph does not contain (see above)
 - `package.json` / lockfile changes that cannot be resolved to specific packages
 - a browser upgrade on the Percy project
 

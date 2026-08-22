@@ -81,7 +81,7 @@ export const start = command('styleguidist-start', {
     // The dev server bundles in memory, so IntelliStory only has a dependency
     // graph to read if the project also produced one on disk — which means
     // `styleguidist.intelliStory.statsFile` has to point at it.
-    let intelliStoryConfig, statsDir;
+    let intelliStoryConfig, statsDir, graphIds;
     if (percy.config.styleguidist?.intelliStory?.enabled && !percy.dryRun) {
       let prepared = prepareIntelliStory({
         config: percy.config.styleguidist.intelliStory,
@@ -91,7 +91,7 @@ export const start = command('styleguidist-start', {
       });
 
       if (prepared.skipReason) log.info(prepared.skipReason);
-      else ({ intelliStoryConfig, statsDir } = prepared);
+      else ({ intelliStoryConfig, statsDir, graphIds } = prepared);
     }
 
     yield* percy.yield.start();
@@ -100,7 +100,7 @@ export const start = command('styleguidist-start', {
     try {
       if (intelliStoryConfig) {
         yield* percy.yield.startBuild();
-        filtered = yield tagComponents(percy, filtered, { intelliStoryConfig, statsDir, log });
+        filtered = yield tagComponents(percy, filtered, { intelliStoryConfig, statsDir, graphIds, log });
       }
 
       result = await takeStyleguidistSnapshots(percy, {

@@ -4,6 +4,7 @@ import path from 'path';
 import { IntelliStoryBailError } from '@percy/cli-command';
 import {
   DEFAULT_STATS_FILE,
+  readGraphIds,
   resolveStatsLocation,
   resolveConfigFile,
   collectGlobalPaths,
@@ -211,6 +212,18 @@ describe('IntelliStory (styleguidist)', () => {
       expect(result).toEqual([sidecar]);
     });
 
+    it('collects examples markdown the graph cannot trace', () => {
+      let md = '/repo/src/Button/Button.md';
+      expect(collectGlobalPaths({ configDir: tmp }, [{ examplesFile: md }], new Set()))
+        .toEqual([md]);
+    });
+
+    it('leaves traceable examples markdown out of the bail set', () => {
+      let md = '/repo/src/Button/Button.md';
+      expect(collectGlobalPaths({ configDir: tmp }, [{ examplesFile: md }], new Set([md])))
+        .toEqual([]);
+    });
+
     it('deduplicates', () => {
       let global = write('src/global.css', '');
       let result = collectGlobalPaths({
@@ -225,22 +238,59 @@ describe('IntelliStory (styleguidist)', () => {
 
   // --- componentImportPath ---
 
-  describe('componentImportPath', () => {
-    it('anchors on the examples markdown when the component has one', () => {
-      expect(componentImportPath({
-        examplesFile: '/repo/src/Button/Button.md',
-        sourcePath: '/repo/src/Button/Button.js'
-      })).toEqual('/repo/src/Button/Button.md');
+  describe('readGraphIds', () => {
+    it('reads the module ids out of the stats file', () => {
+      write('sg/enriched-stats.json', JSON.stringify({
+        modules: [{ id: '/a/B.js' }, { id: '/a/C.js' }, { id: 7 }, {}]
+      }));
+
+      let ids = readGraphIds(path.join(tmp, 'sg'), 'enriched-stats.json');
+      expect([...ids].sort()).toEqual(['/a/B.js', '/a/C.js']);
     });
 
-    it('falls back to the component source when there are no examples', () => {
-      expect(componentImportPath({ examplesFile: null, sourcePath: '/repo/src/Button/Button.js' }))
-        .toEqual('/repo/src/Button/Button.js');
+    it('is empty for a missing or malformed stats file', () => {
+      expect(readGraphIds(tmp, 'nope.json').size).toBe(0);
+      write('sg/bad.json', '{ not json');
+      expect(readGraphIds(path.join(tmp, 'sg'), 'bad.json').size).toBe(0);
+    });
+
+    it('is empty when the stats file carries no modules', () => {
+      write('sg/empty.json', JSON.stringify({ buildId: 'x' }));
+      expect(readGraphIds(path.join(tmp, 'sg'), 'empty.json').size).toBe(0);
+    });
+  });
+
+  describe('componentImportPath', () => {
+    let component = {
+      examplesFile: '/repo/src/Button/Button.md',
+      sourcePath: '/repo/src/Button/Button.js'
+    };
+
+    it('anchors on the examples markdown when the graph contains it', () => {
+      let ids = new Set(['/repo/src/Button/Button.md']);
+      expect(componentImportPath(component, ids)).toEqual('/repo/src/Button/Button.md');
+    });
+
+    // The real bundler plugin only emits modules with an ES import/export, and
+    // Styleguidist's examples-loader emits CommonJS -- so this is the usual case.
+    it('anchors on the component source when the markdown is not a vertex', () => {
+      let ids = new Set(['/repo/src/Button/Button.js']);
+      expect(componentImportPath(component, ids)).toEqual('/repo/src/Button/Button.js');
+    });
+
+    it('anchors on the source when there is no graph to consult', () => {
+      expect(componentImportPath(component)).toEqual('/repo/src/Button/Button.js');
+      expect(componentImportPath(component, new Set())).toEqual('/repo/src/Button/Button.js');
+    });
+
+    it('falls back to the markdown when there is no source path', () => {
+      expect(componentImportPath({ examplesFile: '/repo/a/B.md' }, new Set()))
+        .toEqual('/repo/a/B.md');
     });
 
     it('is null when neither is known', () => {
-      expect(componentImportPath({})).toBeNull();
-      expect(componentImportPath(null)).toBeNull();
+      expect(componentImportPath({}, new Set())).toBeNull();
+      expect(componentImportPath(null, new Set())).toBeNull();
     });
   });
 
@@ -268,6 +318,39 @@ describe('IntelliStory (styleguidist)', () => {
       expect(skipReason).toMatch(/statsFile/);
     });
 
+    it('reads the graph and anchors components on paths it contains', () => {
+      let md = write('src/Button/Button.md', '');
+      write('styleguide/enriched-stats.json', JSON.stringify({ modules: [{ id: md }] }));
+
+      let prepared = prepareIntelliStory({
+        config: { enabled: true },
+        buildDir: path.join(tmp, 'styleguide'),
+        rsgConfig: { configDir: tmp },
+        components: [{ examplesFile: md, sourcePath: write('src/Button/Button.js', '') }],
+        invocationDir: tmp
+      });
+
+      // In the graph, so it is traceable: anchor there, and do not bail on it.
+      expect(prepared.graphIds.has(md)).toBe(true);
+      expect(prepared.globalPaths).toEqual([]);
+    });
+
+    it('bails on examples markdown the graph does not contain', () => {
+      let md = write('src/Button/Button.md', '');
+      write('styleguide/enriched-stats.json', JSON.stringify({ modules: [] }));
+
+      let prepared = prepareIntelliStory({
+        config: { enabled: true },
+        buildDir: path.join(tmp, 'styleguide'),
+        rsgConfig: { configDir: tmp },
+        components: [{ examplesFile: md }],
+        invocationDir: tmp
+      });
+
+      expect(prepared.globalPaths).toEqual([md]);
+      expect(prepared.intelliStoryConfig.bailOnChanges).toEqual([md]);
+    });
+
     it('builds the config, resolving the stats directory and the config file', () => {
       write('styleguide/build/enriched-stats.json', '{}');
       let configFile = write('styleguide.config.js', '');
@@ -281,6 +364,8 @@ describe('IntelliStory (styleguidist)', () => {
         components: [{ metadataPath: sidecar }],
         invocationDir: tmp
       });
+
+      expect(prepared.graphIds instanceof Set).toBe(true);
 
       expect(prepared.statsDir).toEqual(path.join(tmp, 'styleguide', 'build'));
       expect(prepared.intelliStoryConfig).toEqual(jasmine.objectContaining({
@@ -423,9 +508,14 @@ describe('IntelliStory (styleguidist)', () => {
       ));
 
       let result = await tagComponents(percy, components, {
-        intelliStoryConfig: { enabled: true }, statsDir: './styleguide', log, apply
+        intelliStoryConfig: { enabled: true },
+        statsDir: './styleguide',
+        graphIds: new Set(['/repo/src/Button/Button.md']),
+        log,
+        apply
       });
 
+      // Button's markdown is a vertex so it anchors there; Input has none.
       expect(apply.calls.argsFor(0)[1]).toEqual([
         { name: 'Button', importPath: '/repo/src/Button/Button.md' },
         { name: 'Input', importPath: '/repo/src/Input/Input.js' },
