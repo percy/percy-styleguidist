@@ -167,11 +167,45 @@ when any of these change:
 - `package.json` / lockfile changes that cannot be resolved to specific packages
 - a browser upgrade on the Percy project
 
+### What the build looks like
+
+A skipped snapshot is **carried forward, not dropped**. The build still contains
+every component, so it stays a complete visual record — the saving is in
+comparisons *rendered*, not in snapshots reported. For a 4-component build at 2
+widths where one component changed:
+
+| | baseline build | next build |
+|---|---|---|
+| `total-snapshots` | 4 | **4** |
+| `total-comparisons` | 8 | **8** |
+| `total-comparisons-finished` | 8 | **2** |
+| `total-comparisons-skipped-by-smartsnap` | 0 | **6** |
+
+So expect the same snapshot count in the dashboard, with the untouched ones
+showing as unchanged. `total-comparisons-skipped-by-smartsnap` is the number to
+watch to see IntelliStory working.
+
 ### Output
 
 ```
 [percy] IntelliStory: filtered out 42 of 50 snapshots with no detected changes; the remaining 8 were processed.
 ```
+
+### When nothing has changed
+
+An empty diff — a re-run on the same commit, or a commit touching only
+`untraced`/gitignored files — is treated as "nothing to reason about", not as
+"nothing to snapshot". The result is a **full** snapshot run:
+
+```
+[percy] IntelliStory: no affected files or packages detected after filtering; running full snapshot set
+```
+
+> **`failBuildOnFailure: true` turns this into a build failure** (exit 1, no
+> snapshots posted). An unchanged commit is a normal thing to build — a retried
+> CI job, or a commit that only touches untraced files — so treat this option as
+> "fail if IntelliStory cannot run", and be aware that "nothing changed" counts
+> as that.
 
 When IntelliStory cannot run, the reason is logged and the full set is captured:
 
