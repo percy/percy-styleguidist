@@ -43,7 +43,6 @@
     "test": "cross-env NODE_ENV=test NODE_OPTIONS='--loader=./test/loader.js' jasmine --config=./test/jasmine.json",
     "test:env": "cross-env NODE_ENV=test NODE_OPTIONS='--loader=./test/loader.js'",
     "test:coverage": "nyc npm test",
-    "test:e2e": "node test/e2e/run.mjs",
     "prepack": "npm run build",
     "postinstall": "node bin/postinstall.cjs || true"
   },
