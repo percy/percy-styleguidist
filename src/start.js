@@ -3,8 +3,9 @@
 import command, { logger } from '@percy/cli-command';
 import * as common from './common.js';
 import { takeStyleguidistSnapshots } from './snapshots.js';
-import { discoverComponents } from './discovery.js';
+import { discover } from './discovery.js';
 import { shouldIncludeComponent } from './config.js';
+import { prepareIntelliStory, tagComponents, reportIntelliStory } from './intelli-story.js';
 
 function waitForServer(url, timeoutMs = 60000) {
   let deadline = Date.now() + timeoutMs;
@@ -66,7 +67,7 @@ export const start = command('styleguidist-start', {
     log.info(`Using Styleguidist at: ${baseUrl}`);
 
     // Discover first so we can early-return on empty config / all-filtered.
-    let components = discoverComponents(flags.config, log);
+    let { config, components } = discover(flags.config, log);
     if (!components.length) {
       log.warn('No components found. Check your styleguide.config.js');
       return;
@@ -77,18 +78,43 @@ export const start = command('styleguidist-start', {
       return;
     }
 
+    // The dev server bundles in memory, so IntelliStory only has a dependency
+    // graph to read if the project also produced one on disk — which means
+    // `styleguidist.intelliStory.statsFile` has to point at it.
+    let intelliStoryConfig, statsDir;
+    if (percy.config.styleguidist?.intelliStory?.enabled && !percy.dryRun) {
+      let prepared = prepareIntelliStory({
+        config: percy.config.styleguidist.intelliStory,
+        rsgConfig: config,
+        components: filtered,
+        flagConfigPath: flags.config
+      });
+
+      if (prepared.skipReason) log.info(prepared.skipReason);
+      else ({ intelliStoryConfig, statsDir } = prepared);
+    }
+
     yield* percy.yield.start();
+    let result;
+
     try {
-      let { captured, failed } = await takeStyleguidistSnapshots(percy, {
+      if (intelliStoryConfig) {
+        yield* percy.yield.startBuild();
+        filtered = yield tagComponents(percy, filtered, { intelliStoryConfig, statsDir, log });
+      }
+
+      result = await takeStyleguidistSnapshots(percy, {
         baseUrl,
         components: filtered,
         log
       });
-      log.info(`Done: ${captured} captured, ${failed} failed`);
-      if (failed > 0) throw new Error(`${failed} component(s) failed to capture`);
+      log.info(`Done: ${result.captured} captured, ${result.failed} failed`);
     } finally {
       yield* percy.yield.stop();
     }
+
+    if (intelliStoryConfig) yield reportIntelliStory(percy, intelliStoryConfig, log);
+    if (result.failed > 0) throw new Error(`${result.failed} component(s) failed to capture`);
   } finally {
     proc.kill();
   }

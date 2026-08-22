@@ -1,5 +1,6 @@
 import { discoverComponents } from './discovery.js';
 import { shouldIncludeComponent } from './config.js';
+import { intelliStoryOptions } from './intelli-story.js';
 
 /* istanbul ignore next: NOOP_LOG only fires when a caller passes no log */
 const NOOP_LOG = {
@@ -88,6 +89,9 @@ export async function takeStyleguidistSnapshots(percy, opts = {}) {
   async function snapshotComponent(page, component) {
     try {
       let { skip, additionalSnapshots, ...compOpts } = component.percy;
+      // IntelliStory selection tags, when the feature ran. A component's
+      // additional snapshots share its source file, so they share its tags.
+      let intelliStory = intelliStoryOptions(component);
 
       let rendered = await page.eval(evalNavigateToComponent, component.name);
 
@@ -103,6 +107,7 @@ export async function takeStyleguidistSnapshots(percy, opts = {}) {
       percy.snapshot({
         ...snapshot,
         ...compOpts,
+        ...intelliStory,
         name: component.name,
         url: `${baseUrl}?id=${component.slug}`
       });
@@ -120,6 +125,7 @@ export async function takeStyleguidistSnapshots(percy, opts = {}) {
             ...addSnapshot,
             ...compOpts,
             ...addOpts,
+            ...intelliStory,
             name,
             url: `${baseUrl}?id=${component.slug}-${encodeURIComponent(name)}`
           });

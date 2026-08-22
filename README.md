@@ -55,6 +55,120 @@ Examples:
   $ percy styleguidist ./styleguide --exclude "Internal*"
 ```
 
+## IntelliStory (SmartSnap)
+
+IntelliStory skips snapshots whose source cannot have changed since the baseline
+build. The SDK collects two things — the files changed since the baseline
+(`git diff`) and your bundler's dependency graph — and sends them to Percy; the
+API builds the graph and decides, as each snapshot is posted, which ones can
+carry their baseline forward instead of being captured again.
+
+It is opt-in, and **any** failure degrades to a full snapshot run rather than
+breaking the build.
+
+### Requirements
+
+1. **A dependency graph in the styleguide build.** Add the Percy bundler plugin
+   to your `styleguide.config.js` `webpackConfig` so the build emits
+   `enriched-stats.json`:
+
+   ```js
+   module.exports = {
+     webpackConfig: {
+       plugins: [new PercySmartSnapPlugin()]
+     }
+   };
+   ```
+
+   Styleguidist writes assets into the directory you pass to
+   `percy styleguidist`, so the file is found automatically there or in its
+   `build/` subdirectory. Anywhere else, point `statsFile` at it.
+
+2. **A build directory, not a URL.** Selection is keyed on the dependency graph,
+   so `percy styleguidist ./styleguide` is the supported form. URL mode and
+   `percy styleguidist-start` work only if you separately built the styleguide
+   and point `statsFile` at the resulting stats file.
+
+3. **A git repository** with the baseline commit present. Shallow clones that
+   do not contain it fall back to a full run.
+
+### Configuration
+
+```yaml
+# .percy.yml
+version: 2
+styleguidist:
+  intelliStory:
+    enabled: true
+```
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | boolean | `false` | Turn IntelliStory on |
+| `baseline` | string | *(from the API)* | Git ref to diff against. Must be a plain ref or SHA — `HEAD~1` and other revision expressions are rejected. Defaults to the base build's commit as predicted by Percy |
+| `statsFile` | string | `enriched-stats.json` | A bare filename is looked for in the styleguide build directory and its `build/` subdirectory; a path with directories is resolved relative to where you ran the command |
+| `configFile` | string | *(auto-detected)* | Your `styleguide.config.js`. Defaults to `--config`, or the file Styleguidist discovered |
+| `untraced` | string[] | `[]` | Globs for files that should never mark a component as affected (e.g. `README.md`) |
+| `bailOnChanges` | string[] | `[]` | Globs that force a full run when they change |
+| `failBuildOnFailure` | boolean | `false` | Fail the build instead of falling back to a full run |
+| `trace` | boolean | `false` | Write a `trace.html` dependency-graph report |
+
+Globs in `untraced` and `bailOnChanges` are relative to the directory you ran
+`percy styleguidist` from. Prefix with `<rootDir>/` to anchor them at the
+repository root instead.
+
+### What anchors a component
+
+A component's "story" is its **examples markdown** (`Button.md`), not its source
+file. Styleguidist's examples-loader compiles the markdown into a module that
+imports the component and everything the examples themselves use, so the whole
+rendered page is reachable from it — which means editing the examples selects
+the component, exactly as editing the component does. Components with no
+examples file fall back to their source file.
+
+### What forces a full run
+
+Some Styleguidist configuration sits outside the per-component dependency graph
+— it is reachable only from Styleguidist's own runtime entry — so a change to it
+cannot be attributed to individual components. IntelliStory runs the full set
+when any of these change:
+
+- `styleguide.config.js` (or whatever `configFile` resolves to)
+- files listed in the config's `require`
+- `styles`, `theme`, a string `template`, `styleguideComponents` targets, and
+  anything under `assetsDir`
+- the per-component Percy JSON sidecars (they decide *what* gets captured)
+- `package.json` / lockfile changes that cannot be resolved to specific packages
+- a browser upgrade on the Percy project
+
+### Output
+
+```
+[percy] IntelliStory: filtered out 42 of 50 snapshots with no detected changes; the remaining 8 were processed.
+```
+
+When IntelliStory cannot run, the reason is logged and the full set is captured:
+
+```
+[percy] IntelliStory: stats file "enriched-stats.json" not found in /app/styleguide; running full snapshot set
+[percy] IntelliStory: no affected files or packages detected after filtering; running full snapshot set
+```
+
+> The IntelliStory engine is shared with `@percy/storybook`, so a few of its
+> messages say "story" or "Storybook config directory" where they mean
+> "component" or your `styleguide.config.js`.
+
+## Other Percy Config
+
+```yaml
+# .percy.yml
+version: 2
+styleguidist:
+  # Browser pages used to capture components in parallel.
+  # Defaults to discovery.concurrency, or 5.
+  concurrency: 5
+```
+
 ## Per-Component Configuration
 
 Add a JSON sidecar file next to your component to configure Percy options:
@@ -164,3 +278,34 @@ Options:
 - `components` *(optional)* — pre-discovered components; skips internal
   discovery + filtering
 - `log` *(optional)* — logger with `warn`/`error`/`debug` methods
+
+IntelliStory is orchestrated by the command, not by this function — it has to
+create the Percy build before any snapshot is posted. To drive it yourself, tag
+the components and pass them in via `components`:
+
+```js
+import {
+  discover, prepareIntelliStory, tagComponents, reportIntelliStory,
+  takeStyleguidistSnapshots
+} from '@percy/styleguidist';
+
+const { config, components } = discover('./styleguide.config.js');
+const { intelliStoryConfig, statsDir, skipReason } = prepareIntelliStory({
+  config: { enabled: true },
+  buildDir: './styleguide',
+  rsgConfig: config,
+  components
+});
+
+await percy.start();
+let tagged = components;
+
+if (!skipReason) {
+  await percy.startBuild();
+  tagged = await tagComponents(percy, components, { intelliStoryConfig, statsDir, log });
+}
+
+await takeStyleguidistSnapshots(percy, { baseUrl, components: tagged, log });
+await percy.stop();
+if (!skipReason) await reportIntelliStory(percy, intelliStoryConfig, log);
+```

@@ -1,7 +1,9 @@
 import command, { logger } from '@percy/cli-command';
 import * as common from './common.js';
-import { discoverComponents } from './discovery.js';
+import { configSchema } from './percy-config.js';
+import { discover } from './discovery.js';
 import { shouldIncludeComponent } from './config.js';
+import { prepareIntelliStory, tagComponents, reportIntelliStory } from './intelli-story.js';
 import { takeStyleguidistSnapshots, buildSnapshotName } from './snapshots.js';
 import start from './start.js';
 
@@ -25,6 +27,10 @@ export const styleguidist = command('styleguidist', {
 
   percy: {
     delayUploads: true
+  },
+
+  config: {
+    schemas: [configSchema]
   }
 
 }, async function*({ percy, args, flags, exit }) {
@@ -40,9 +46,9 @@ export const styleguidist = command('styleguidist', {
   // Discovery + filter live in the CLI so we can log "Discovered N",
   // honor dry-run, and return early when filters exclude everything —
   // none of which the programmatic API needs to do.
-  let components;
+  let config, components;
   try {
-    components = discoverComponents(flags.config, log);
+    ({ config, components } = discover(flags.config, log));
   } catch (err) {
     log.error(`Component discovery failed: ${err.message}`);
     throw err;
@@ -84,19 +90,57 @@ export const styleguidist = command('styleguidist', {
     return;
   }
 
+  // IntelliStory selects snapshots server-side against the real Percy build, so
+  // it only runs when there is a build to select against and a dependency graph
+  // to reason about. Prepared before `percy.start()` so a missing stats file is
+  // reported before any work is done.
+  let intelliStoryConfig, statsDir;
+  if (percy.config.styleguidist?.intelliStory?.enabled) {
+    let prepared = prepareIntelliStory({
+      config: percy.config.styleguidist.intelliStory,
+      buildDir: args.serve,
+      rsgConfig: config,
+      components: filtered,
+      flagConfigPath: flags.config
+    });
+
+    if (prepared.skipReason) {
+      log.info(prepared.skipReason);
+    } else {
+      ({ intelliStoryConfig, statsDir } = prepared);
+      log.debug(`IntelliStory: reading the dependency graph from ${statsDir}; ` +
+        `bailing on changes to ${prepared.globalPaths.length} global Styleguidist path(s)`);
+    }
+  }
+
   yield* percy.yield.start();
+  let result;
+
   try {
-    let { captured, failed } = await takeStyleguidistSnapshots(percy, {
+    // The build is otherwise created lazily on the first flush (uploads are
+    // delayed), but the graph is keyed by the build id, so create it up front.
+    if (intelliStoryConfig) {
+      yield* percy.yield.startBuild();
+      filtered = yield tagComponents(percy, filtered, { intelliStoryConfig, statsDir, log });
+    }
+
+    result = await takeStyleguidistSnapshots(percy, {
       baseUrl,
       components: filtered,
       log
     });
-    log.info(`Done: ${captured} captured, ${failed} failed`);
-    if (failed > 0) throw new Error(`${failed} component(s) failed to capture`);
+    log.info(`Done: ${result.captured} captured, ${result.failed} failed`);
   } finally {
+    // Finalizes the build, which is what makes the graph job's data readable.
     yield* percy.yield.stop();
     await server?.close();
   }
+
+  if (intelliStoryConfig) {
+    yield reportIntelliStory(percy, intelliStoryConfig, log);
+  }
+
+  if (result.failed > 0) throw new Error(`${result.failed} component(s) failed to capture`);
 });
 
 export default styleguidist;
