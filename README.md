@@ -201,11 +201,12 @@ An empty diff — a re-run on the same commit, or a commit touching only
 [percy] IntelliStory: no affected files or packages detected after filtering; running full snapshot set
 ```
 
-> **`failBuildOnFailure: true` turns this into a build failure** (exit 1, no
-> snapshots posted). An unchanged commit is a normal thing to build — a retried
-> CI job, or a commit that only touches untraced files — so treat this option as
-> "fail if IntelliStory cannot run", and be aware that "nothing changed" counts
-> as that.
+> **`failBuildOnFailure: true` turns this into a failed build.** Measured on a
+> real build: CLI exit `1`, and Percy records the build as `state: failed` with
+> `total-snapshots: 0` — so it goes red in the dashboard as well as in CI. An
+> unchanged commit is a normal thing to build (a retried CI job, or a commit
+> touching only untraced files), so treat this option as "fail if IntelliStory
+> cannot run", and be aware that "nothing changed" counts as that.
 
 When IntelliStory cannot run, the reason is logged and the full set is captured:
 
