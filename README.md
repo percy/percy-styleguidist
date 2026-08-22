@@ -95,8 +95,27 @@ breaking the build.
    `percy styleguidist-start` work only if you separately built the styleguide
    and point `statsFile` at the resulting stats file.
 
-3. **A git repository** with the baseline commit present. Shallow clones that
-   do not contain it fall back to a full run.
+3. **Enough git history for the base build's commit to be present.** This is the
+   one most likely to catch you out, because the usual CI default breaks it:
+
+   ```
+   IntelliStory: git diff --name-only <sha> HEAD -- failed: fatal: bad object <sha>
+   ```
+
+   A `--depth 1` clone contains exactly one commit, so the base commit is not
+   there and the diff cannot run — IntelliStory then falls back to a full
+   snapshot run on *every* build. `actions/checkout` defaults to
+   `fetch-depth: 1`, so fetch full history explicitly:
+
+   ```yaml
+   - uses: actions/checkout@v4
+     with:
+       fetch-depth: 0   # IntelliStory needs the base build's commit
+   ```
+
+   The same applies after a force-push, rebase or squash-merge that orphans the
+   base commit, and when a Percy project is shared across repositories (the base
+   build's commit is then from a different history and will never resolve).
 
 4. **A comparison-based plan, and the feature enabled for your organization.**
    IntelliStory saves *comparisons*, so on a page-count plan there is nothing to
