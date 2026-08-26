@@ -55,6 +55,215 @@ Examples:
   $ percy styleguidist ./styleguide --exclude "Internal*"
 ```
 
+## IntelliStory (SmartSnap)
+
+IntelliStory skips snapshots whose source cannot have changed since the baseline
+build. The SDK collects two things — the files changed since the baseline
+(`git diff`) and your bundler's dependency graph — and sends them to Percy; the
+API builds the graph and decides, as each snapshot is posted, which ones can
+carry their baseline forward instead of being captured again.
+
+It is opt-in, and **any** failure degrades to a full snapshot run rather than
+breaking the build.
+
+### Requirements
+
+1. **A dependency graph in the styleguide build.** Add the Percy bundler plugin
+   to your `styleguide.config.js` `webpackConfig` so the build emits
+   `enriched-stats.json`:
+
+   ```bash
+   npm install --save-dev @percy/bundler-plugin-smartsnap
+   ```
+
+   ```js
+   const { webpackPlugin } = require('@percy/bundler-plugin-smartsnap');
+
+   module.exports = {
+     webpackConfig: {
+       plugins: [webpackPlugin()]
+     }
+   };
+   ```
+
+   Styleguidist writes assets into the directory you pass to
+   `percy styleguidist`, so the file is found automatically there or in its
+   `build/` subdirectory. Anywhere else, point `statsFile` at it.
+
+2. **A build directory, not a URL.** Selection is keyed on the dependency graph,
+   so `percy styleguidist ./styleguide` is the supported form. URL mode and
+   `percy styleguidist-start` work only if you separately built the styleguide
+   and point `statsFile` at the resulting stats file.
+
+3. **Enough git history for the base build's commit to be present.** This is the
+   one most likely to catch you out, because the usual CI default breaks it:
+
+   ```
+   IntelliStory: git diff --name-only <sha> HEAD -- failed: fatal: bad object <sha>
+   ```
+
+   A `--depth 1` clone contains exactly one commit, so the base commit is not
+   there and the diff cannot run — IntelliStory then falls back to a full
+   snapshot run on *every* build. `actions/checkout` defaults to
+   `fetch-depth: 1`, so fetch full history explicitly:
+
+   ```yaml
+   - uses: actions/checkout@v4
+     with:
+       fetch-depth: 0   # IntelliStory needs the base build's commit
+   ```
+
+   The same applies after a force-push, rebase or squash-merge that orphans the
+   base commit, and when a Percy project is shared across repositories (the base
+   build's commit is then from a different history and will never resolve).
+
+4. **A comparison-based plan, and the feature enabled for your organization.**
+   IntelliStory saves *comparisons*, so on a page-count plan there is nothing to
+   save — the base build contains every component regardless. It is gated on
+   both, and a request from an organization without it comes back as `403`,
+   which degrades to a full run:
+
+   ```
+   IntelliStory: not enabled for this organization (graph generation request was not allowed); running full snapshot set
+   ```
+
+5. **A base build whose commit is in your repo.** Percy picks the base build,
+   and IntelliStory diffs against its commit — so if that commit is not in the
+   clone (an unrelated branch, a squashed history), the diff fails and the full
+   set runs. This is the normal case for PR builds, where the base is a build on
+   the target branch. It is worth knowing when the numbers look wrong: a build
+   whose base has no snapshots in common carries nothing forward and reports
+   `filtered out 0 of N`, even though the graph itself was built fine.
+
+### Configuration
+
+```yaml
+# .percy.yml
+version: 2
+styleguidist:
+  intelliStory:
+    enabled: true
+```
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | boolean | `false` | Turn IntelliStory on |
+| `baseline` | string | *(from the API)* | Git ref to diff against. Must be a plain ref or SHA — `HEAD~1` and other revision expressions are rejected. Defaults to the base build's commit as predicted by Percy |
+| `statsFile` | string | `enriched-stats.json` | A bare filename is looked for in the styleguide build directory and its `build/` subdirectory; a path with directories is resolved relative to where you ran the command |
+| `configFile` | string | *(auto-detected)* | Your `styleguide.config.js`. Defaults to `--config`, or the file Styleguidist discovered |
+| `untraced` | string[] | `[]` | Globs for files that should never mark a component as affected (e.g. `README.md`) |
+| `bailOnChanges` | string[] | `[]` | Globs that force a full run when they change |
+| `failBuildOnFailure` | boolean | `false` | Fail the build instead of falling back to a full run |
+| `trace` | boolean | `false` | Write a `trace.html` dependency-graph report |
+
+Globs in `untraced` and `bailOnChanges` are relative to the directory you ran
+`percy styleguidist` from. Prefix with `<rootDir>/` to anchor them at the
+repository root instead.
+
+### What anchors a component
+
+Selection is keyed on a file the dependency graph knows about, so each component
+is anchored on its **source file** (`Button.js`) — changes to it, and to anything
+it imports transitively, select the component precisely.
+
+Its **examples markdown** (`Button.md`) would be the better anchor in principle:
+Styleguidist's examples-loader compiles it into a module that imports the
+component plus everything the examples use, making it the exact analogue of a
+Storybook `*.stories.js` entry. But `@percy/bundler-plugin-smartsnap` only emits
+modules with at least one ES module import or export, and the examples-loader
+emits CommonJS — so the markdown is not in the graph, and neither is the
+Styleguidist entry that requires it (that lives in `node_modules`).
+
+The SDK therefore checks the graph: if the markdown *is* a vertex it anchors
+there, and otherwise anchors on the source and treats the markdown as
+untraceable — a change to it forces a full run rather than being silently
+attributed to nothing. **In practice this means doc-only changes get no
+reduction today**, and will start to once the plugin emits those modules.
+
+### What forces a full run
+
+Some Styleguidist configuration sits outside the per-component dependency graph
+— it is reachable only from Styleguidist's own runtime entry — so a change to it
+cannot be attributed to individual components. IntelliStory runs the full set
+when any of these change:
+
+- `styleguide.config.js` (or whatever `configFile` resolves to)
+- files listed in the config's `require`
+- `styles`, `theme`, a string `template`, `styleguideComponents` targets, and
+  anything under `assetsDir`
+- the per-component Percy JSON sidecars (they decide *what* gets captured)
+- examples markdown the dependency graph does not contain (see above)
+- `package.json` / lockfile changes that cannot be resolved to specific packages
+- a browser upgrade on the Percy project
+
+### What the build looks like
+
+A skipped snapshot is **carried forward, not dropped**. The build still contains
+every component, so it stays a complete visual record — the saving is in
+comparisons *rendered*, not in snapshots reported. For a 4-component build at 2
+widths where one component changed:
+
+| | baseline build | next build |
+|---|---|---|
+| `total-snapshots` | 4 | **4** |
+| `total-comparisons` | 8 | **8** |
+| `total-comparisons-finished` | 8 | **2** |
+| `total-comparisons-skipped-by-smartsnap` | 0 | **6** |
+
+So expect the same snapshot count in the dashboard, with the untouched ones
+grouped under **Unchanged**. `total-comparisons-skipped-by-smartsnap` is the
+number to watch to see IntelliStory working.
+
+The snapshot and comparison rows always exist because billing and the build page
+are built on comparisons existing — a skipped comparison is a terminal success
+state whose head image is the baseline's, not a missing record. What is avoided
+is the render.
+
+### Output
+
+```
+[percy] IntelliStory: filtered out 42 of 50 snapshots with no detected changes; the remaining 8 were processed.
+```
+
+### When nothing has changed
+
+An empty diff — a re-run on the same commit, or a commit touching only
+`untraced`/gitignored files — is treated as "nothing to reason about", not as
+"nothing to snapshot". The result is a **full** snapshot run:
+
+```
+[percy] IntelliStory: no affected files or packages detected after filtering; running full snapshot set
+```
+
+> **`failBuildOnFailure: true` turns this into a failed build.** Measured on a
+> real build: CLI exit `1`, and Percy records the build as `state: failed` with
+> `total-snapshots: 0` — so it goes red in the dashboard as well as in CI. An
+> unchanged commit is a normal thing to build (a retried CI job, or a commit
+> touching only untraced files), so treat this option as "fail if IntelliStory
+> cannot run", and be aware that "nothing changed" counts as that.
+
+When IntelliStory cannot run, the reason is logged and the full set is captured:
+
+```
+[percy] IntelliStory: stats file "enriched-stats.json" not found in /app/styleguide; running full snapshot set
+[percy] IntelliStory: no affected files or packages detected after filtering; running full snapshot set
+```
+
+> The IntelliStory engine is shared with `@percy/storybook`, so a few of its
+> messages say "story" or "Storybook config directory" where they mean
+> "component" or your `styleguide.config.js`.
+
+## Other Percy Config
+
+```yaml
+# .percy.yml
+version: 2
+styleguidist:
+  # Browser pages used to capture components in parallel.
+  # Defaults to discovery.concurrency, or 5.
+  concurrency: 5
+```
+
 ## Per-Component Configuration
 
 Add a JSON sidecar file next to your component to configure Percy options:
@@ -164,3 +373,34 @@ Options:
 - `components` *(optional)* — pre-discovered components; skips internal
   discovery + filtering
 - `log` *(optional)* — logger with `warn`/`error`/`debug` methods
+
+IntelliStory is orchestrated by the command, not by this function — it has to
+create the Percy build before any snapshot is posted. To drive it yourself, tag
+the components and pass them in via `components`:
+
+```js
+import {
+  discover, prepareIntelliStory, tagComponents, reportIntelliStory,
+  takeStyleguidistSnapshots
+} from '@percy/styleguidist';
+
+const { config, components } = discover('./styleguide.config.js');
+const { intelliStoryConfig, statsDir, skipReason } = prepareIntelliStory({
+  config: { enabled: true },
+  buildDir: './styleguide',
+  rsgConfig: config,
+  components
+});
+
+await percy.start();
+let tagged = components;
+
+if (!skipReason) {
+  await percy.startBuild();
+  tagged = await tagComponents(percy, components, { intelliStoryConfig, statsDir, log });
+}
+
+await takeStyleguidistSnapshots(percy, { baseUrl, components: tagged, log });
+await percy.stop();
+if (!skipReason) await reportIntelliStory(percy, intelliStoryConfig, log);
+```

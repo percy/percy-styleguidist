@@ -74,8 +74,25 @@ function readPercyConfig(filepath, configDir, log) {
   return {};
 }
 
+// Absolute path of the component's examples markdown, or null when it has none.
+//
+// RSG's own `getExampleFilename` resolver is used so custom conventions
+// (`Readme.md`, `FolderName.md`, or a user-supplied function) are honored
+// exactly as the styleguide build does. IntelliStory anchors change detection on
+// this file — see `componentImportPath` in intelli-story.js.
+function exampleFileFor(sourcePath, rsgConfig) {
+  if (!sourcePath || typeof rsgConfig?.getExampleFilename !== 'function') return null;
+  try {
+    let file = rsgConfig.getExampleFilename(sourcePath);
+    return (typeof file === 'string' && file && fs.existsSync(file)) ? file : null;
+  } catch (e) {
+    /* istanbul ignore next: a user-supplied resolver that throws */
+    return null;
+  }
+}
+
 // Recursively flatten RSG sections tree into a list of components.
-function flattenSections(sections, configDir, log, depth = 0) {
+function flattenSections(sections, configDir, log, depth = 0, rsgConfig = null) {
   if (depth > 10 || !Array.isArray(sections)) return [];
 
   let components = [];
@@ -85,29 +102,45 @@ function flattenSections(sections, configDir, log, depth = 0) {
         if (!comp.slug) continue;
         let name = comp.visibleName || comp.name || nameFromFilepath(comp.filepath);
         if (!name) continue;
+
+        // RSG reports `filepath` relative to its config directory. Absolute
+        // paths are what IntelliStory needs: it rebases them onto the git
+        // project root itself, which a config-relative path cannot survive.
+        let sourcePath = comp.filepath ? path.resolve(configDir || '.', comp.filepath) : null;
+        let metadataPath = sourcePath?.replace(/\.\w+$/, '.json');
+
         components.push({
           name,
           slug: comp.slug,
           filepath: comp.filepath || null,
+          sourcePath,
+          examplesFile: exampleFileFor(sourcePath, rsgConfig),
+          metadataPath: (metadataPath && fs.existsSync(metadataPath)) ? metadataPath : null,
           percy: readPercyConfig(comp.filepath, configDir, log)
         });
       }
     }
     if (Array.isArray(section.sections)) {
-      components.push(...flattenSections(section.sections, configDir, log, depth + 1));
+      components.push(...flattenSections(section.sections, configDir, log, depth + 1, rsgConfig));
     }
   }
   return components;
 }
 
 // Exported for testing
-export { flattenSections, readPercyConfig, nameFromFilepath };
+export { flattenSections, readPercyConfig, nameFromFilepath, exampleFileFor };
 
-export function discoverComponents(configPath, log) {
+// Discovery plus the resolved RSG config. IntelliStory needs the config itself
+// (for `getExampleFilename`, `require`, `styles`, …), not just the components.
+export function discover(configPath, log) {
   let config = getConfig(configPath);
   let sections = getSections(config);
-  let components = flattenSections(sections, config.configDir, log);
+  let components = flattenSections(sections, config.configDir, log, 0, config);
 
   if (log) log.debug(`Discovered ${components.length} components from ${sections.length} sections`);
-  return components;
+  return { config, components };
+}
+
+export function discoverComponents(configPath, log) {
+  return discover(configPath, log).components;
 }

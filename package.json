@@ -23,7 +23,7 @@
     "access": "public"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "files": [
     "dist",
@@ -52,10 +52,11 @@
     ]
   },
   "dependencies": {
+    "@percy/cli-command": "^1.32.7",
     "cross-spawn": "^7.0.6"
   },
   "peerDependencies": {
-    "@percy/cli": "^1.31.0",
+    "@percy/cli": "^1.32.7",
     "react-styleguidist": ">=11 <14"
   },
   "peerDependenciesMeta": {
@@ -70,9 +71,9 @@
     "@babel/eslint-plugin": "^7.27.1",
     "@babel/preset-env": "^7.26.0",
     "@babel/preset-react": "^7.25.9",
-    "@percy/cli": "^1.31.0",
-    "@percy/cli-command": "^1.31.0",
-    "@percy/core": "^1.31.0",
+    "@percy/cli": "^1.32.7",
+    "@percy/cli-command": "^1.32.7",
+    "@percy/core": "^1.32.7",
     "babel-loader": "^9.2.1",
     "babel-plugin-istanbul": "^8.0.0",
     "cross-env": "^7.0.3",

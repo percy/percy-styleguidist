@@ -683,6 +683,54 @@ describe('percy styleguidist', () => {
       let result = helpers.flattenSections(sections, '.');
       expect(result[0].name).toBe('NamedBtn');
     });
+
+    it('resolves the source path against the cwd when there is no config dir', () => {
+      let sections = [{ components: [{ slug: 'btn', filepath: 'Button.js' }] }];
+      let result = helpers.flattenSections(sections, null);
+      expect(result[0].sourcePath).toBe(path.resolve('.', 'Button.js'));
+    });
+
+    it('leaves sourcePath, examplesFile and metadataPath null without a filepath', () => {
+      let sections = [{ components: [{ slug: 'btn', visibleName: 'Button' }] }];
+      let result = helpers.flattenSections(sections, '.');
+      expect(result[0].sourcePath).toBeNull();
+      expect(result[0].examplesFile).toBeNull();
+      expect(result[0].metadataPath).toBeNull();
+    });
+  });
+
+  describe('exampleFileFor', () => {
+    let helpers;
+    beforeAll(async () => {
+      helpers = await import('../src/discovery.js');
+    });
+
+    it('is null without a source path', () => {
+      expect(helpers.exampleFileFor(null, { getExampleFilename: () => 'x.md' })).toBeNull();
+    });
+
+    it('is null when the RSG config has no resolver', () => {
+      expect(helpers.exampleFileFor('/a/B.js', null)).toBeNull();
+      expect(helpers.exampleFileFor('/a/B.js', {})).toBeNull();
+    });
+
+    it('is null when the resolver reports no examples file', () => {
+      expect(helpers.exampleFileFor('/a/B.js', { getExampleFilename: () => false })).toBeNull();
+    });
+
+    it('is null when the resolved file does not exist', () => {
+      expect(helpers.exampleFileFor('/a/B.js', {
+        getExampleFilename: () => '/a/does-not-exist.md'
+      })).toBeNull();
+    });
+
+    it('returns the resolved file when it exists', () => {
+      let md = path.join(FIXTURE_DIR, 'src/components/Button/Button.md');
+      expect(helpers.exampleFileFor(
+        path.join(FIXTURE_DIR, 'src/components/Button/Button.js'),
+        { getExampleFilename: () => md }
+      )).toBe(md);
+    });
   });
 
   describe('rsg-adapter', () => {
@@ -733,6 +781,149 @@ describe('percy styleguidist', () => {
     it('returns empty array for empty sections config', () => {
       let components = discoverComponents(EMPTY_CONFIG_PATH);
       expect(components).toEqual([]);
+    });
+
+    it('resolves the absolute source, examples markdown and Percy sidecar', async () => {
+      let { discover } = await import('../src/discovery.js');
+      let { config, components } = discover(CONFIG_PATH);
+
+      // `discover` also hands back the RSG config, which IntelliStory needs for
+      // globally required files and the examples-file resolver.
+      expect(config.configDir).toBe(FIXTURE_DIR);
+
+      let button = components.find(c => c.name === 'Button');
+      expect(button.sourcePath).toBe(path.join(FIXTURE_DIR, 'src/components/Button/Button.js'));
+      expect(button.examplesFile).toBe(path.join(FIXTURE_DIR, 'src/components/Button/Button.md'));
+      expect(button.metadataPath).toBe(path.join(FIXTURE_DIR, 'src/components/Button/Button.json'));
+    });
+  });
+
+  // --- IntelliStory ---
+
+  describe('IntelliStory', () => {
+    function percyYml(...lines) {
+      fs.writeFileSync('.percy.yml', ['version: 2', 'styleguidist:', ...lines].join('\n'));
+    }
+
+    afterEach(() => {
+      try { fs.unlinkSync('.percy.yml'); } catch { /* not written */ }
+    });
+
+    it('is registered in the Percy config schema', async () => {
+      percyYml(
+        '  concurrency: 2',
+        '  intelliStory:',
+        '    enabled: false',
+        '    untraced:',
+        '      - docs/**'
+      );
+
+      await styleguidist([BUILD_DIR, '--dry-run', `--config=${CONFIG_PATH}`]);
+
+      // A registered schema means no "unknown property" warnings and the values
+      // survive load instead of being scrubbed.
+      expect(logger.stderr.filter(l => l.includes('Invalid config'))).toEqual([]);
+      expect(logger.stderr.filter(l => /- styleguidist/.test(l))).toEqual([]);
+    });
+
+    it('rejects unknown IntelliStory options', async () => {
+      percyYml('  intelliStory:', '    enabled: false', '    nope: true');
+
+      await styleguidist([BUILD_DIR, '--dry-run', `--config=${CONFIG_PATH}`]);
+
+      expect(logger.stderr).toEqual(jasmine.arrayContaining([
+        jasmine.stringMatching('Invalid config'),
+        jasmine.stringMatching('styleguidist.intelliStory.nope: unknown property')
+      ]));
+    });
+
+    it('does not run on a dry run', async () => {
+      percyYml('  intelliStory:', '    enabled: true');
+
+      await styleguidist([BUILD_DIR, '--dry-run', `--config=${CONFIG_PATH}`]);
+
+      expect(logger.stdout.concat(logger.stderr).filter(l => l.includes('IntelliStory'))).toEqual([]);
+      expect(logger.stdout).toEqual(jasmine.arrayContaining([
+        jasmine.stringMatching('Snapshot found: Button')
+      ]));
+    });
+
+    it('degrades to the full snapshot set when the stats file is missing', async () => {
+      percyYml('  intelliStory:', '    enabled: true');
+
+      await styleguidist([BUILD_DIR, `--config=${CONFIG_PATH}`, '--include=Input']);
+
+      expect(logger.stdout).toEqual(jasmine.arrayContaining([
+        jasmine.stringMatching('IntelliStory: stats file "enriched-stats.json" not found in'),
+        jasmine.stringMatching('Snapshot taken: Input')
+      ]));
+      // Nothing was tagged, so no selection was attempted server-side.
+      expect(api.requests['/intelli_story/generate-graph']).toBeUndefined();
+    });
+
+    it('explains how to point at the stats file when there is no build directory', async () => {
+      percyYml('  intelliStory:', '    enabled: true');
+
+      await styleguidist(['http://localhost:9999', '--dry-run', `--config=${CONFIG_PATH}`]);
+      // dry-run short-circuits, so re-run against the URL for real
+      logger.reset();
+      percyYml('  intelliStory:', '    enabled: true');
+
+      await expectAsync(
+        styleguidist(['http://localhost:9999', `--config=${CONFIG_PATH}`, '--include=Input'])
+      ).toBeRejected();
+
+      expect(logger.stdout).toEqual(jasmine.arrayContaining([
+        jasmine.stringMatching('IntelliStory: stats file "enriched-stats.json" could not be located')
+      ]));
+    });
+
+    it('captures the full set and still reports when IntelliStory bails mid-flight', async () => {
+      // The stats file resolves, so IntelliStory runs for real: it creates the
+      // build, fails to get a baseline, degrades to the full set, and still
+      // runs its post-finalize reporting.
+      let statsPath = path.join(FIXTURE_DIR, 'enriched-stats.json');
+      fs.writeFileSync(statsPath, JSON.stringify({ modules: [] }));
+
+      percyYml('  intelliStory:', '    enabled: true', `    statsFile: ${statsPath}`);
+      api.reply('/intelli_story/snapshot-name-to-commit?build_id=123', () => [200, {}]);
+
+      try {
+        await styleguidist([BUILD_DIR, `--config=${CONFIG_PATH}`, '--include=Input']);
+      } finally {
+        fs.unlinkSync(statsPath);
+      }
+
+      expect(logger.stdout).toEqual(jasmine.arrayContaining([
+        jasmine.stringMatching('IntelliStory: API could not predict a base build commit'),
+        jasmine.stringMatching('Snapshot taken: Input')
+      ]));
+      // Degraded, so nothing was tagged and no graph was enqueued.
+      expect(api.requests['/intelli_story/generate-graph']).toBeUndefined();
+    });
+
+    it('fails the build when failBuildOnFailure is set and IntelliStory cannot run', async () => {
+      // The stats file resolves, so IntelliStory runs and then bails on the
+      // baseline lookup — which `failBuildOnFailure` turns into a hard failure.
+      let statsPath = path.join(FIXTURE_DIR, 'enriched-stats.json');
+      fs.writeFileSync(statsPath, JSON.stringify({ modules: [] }));
+
+      percyYml(
+        '  intelliStory:',
+        '    enabled: true',
+        `    statsFile: ${statsPath}`,
+        '    failBuildOnFailure: true'
+      );
+
+      api.reply('/intelli_story/snapshot-name-to-commit?build_id=123', () => [200, {}]);
+
+      try {
+        await expectAsync(
+          styleguidist([BUILD_DIR, `--config=${CONFIG_PATH}`, '--include=Input'])
+        ).toBeRejectedWithError(/IntelliStory/);
+      } finally {
+        fs.unlinkSync(statsPath);
+      }
     });
   });
 
