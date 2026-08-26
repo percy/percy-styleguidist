@@ -76,7 +76,8 @@ export function resolveConfigFile(rsgConfig, flagConfigPath, invocationDir = pro
 // to dependency traversal and has to force a full run, exactly as a change
 // inside Storybook's `.storybook` directory does.
 //
-// Returned as absolute paths; `bailOnChanges` rebases them onto the repo root.
+// Returned as absolute paths — plus an absolute `/**` glob per assets directory
+// — which `bailOnChanges` rebases onto the repo root itself.
 export function collectGlobalPaths(rsgConfig, components = [], graphIds) {
   let out = new Set();
   let dir = rsgConfig?.configDir;
@@ -161,9 +162,9 @@ export function componentImportPath(component, graphIds) {
   return component?.sourcePath || examples || null;
 }
 
-// Assembles the `intelliStoryConfig` handed to `applyIntelliStory`, and the
-// stats directory to read the dependency graph from. Returns `null` with a
-// reason when IntelliStory cannot run at all.
+// Assembles the `intelliStoryConfig` handed to `applyIntelliStory`, the stats
+// directory to read the dependency graph from, and the graph's module ids.
+// Returns `{ skipReason }` instead when IntelliStory cannot run at all.
 export function prepareIntelliStory({
   config, buildDir, rsgConfig, components, flagConfigPath, invocationDir = process.cwd()
 }) {
