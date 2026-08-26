@@ -1,6 +1,6 @@
 {
   "name": "@percy/styleguidist",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Percy CLI plugin for visual testing React Styleguidist components",
   "keywords": [
     "percy",
@@ -23,7 +23,7 @@
     "access": "public"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=18"
   },
   "files": [
     "dist",
