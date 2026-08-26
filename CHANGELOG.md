@@ -1,5 +1,52 @@
 # Changelog
 
+## 1.1.0
+
+### Features
+
+- **IntelliStory (SmartSnap)** — opt-in filtering that skips snapshots whose
+  source cannot have changed since the baseline build. The SDK collects the git
+  diff and the bundler's dependency graph; Percy decides server-side which
+  snapshots carry their baseline forward.
+
+  ```yaml
+  # .percy.yml
+  version: 2
+  styleguidist:
+    intelliStory:
+      enabled: true
+  ```
+
+  Requires `@percy/bundler-plugin-smartsnap` in your `styleguide.config.js`
+  `webpackConfig` to emit `enriched-stats.json`, a build directory (not a URL),
+  and enough git history for the base build's commit to be present — a shallow
+  CI clone (`actions/checkout` defaults to `fetch-depth: 1`) makes every build
+  fall back to the full set. See the README for the full option list and the
+  cases that force a full run.
+
+  Components are anchored on their source file. Changes to examples markdown
+  cannot be traced through the dependency graph, so they force a full run
+  rather than being silently attributed to nothing — doc-only changes get no
+  reduction for now.
+
+- `.percy.yml` schema for the `styleguidist` key. This never existed, so
+  `@percy/config` treated `styleguidist:` as an unknown property and removed
+  it — meaning the previously undocumented `styleguidist.concurrency` option
+  had no effect. It works now.
+
+### Requirements
+
+- `@percy/cli` peer range narrowed to `^1.32.7`. IntelliStory's engine
+  (`applyIntelliStory`) ships in `@percy/cli-command` 1.32.7, so earlier CLI
+  versions cannot run it.
+
+### Internal
+
+- CI tests node 20 and 22; node 18 was dropped because the dev dependency tree
+  now requires >= 20. `engines.node` deliberately stays `>=18` — dev
+  dependencies do not constrain consumers, so the package still runs there,
+  it is simply no longer covered by CI.
+
 ## 0.1.0
 
 Initial release of `@percy/styleguidist`.
