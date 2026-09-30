@@ -68,7 +68,7 @@
     "@babel/cli": "^7.26.0",
     "@babel/core": "^7.26.0",
     "@babel/eslint-parser": "^7.28.6",
-    "@babel/eslint-plugin": "^7.27.1",
+    "@babel/eslint-plugin": "^8.0.6",
     "@babel/preset-env": "^7.26.0",
     "@babel/preset-react": "^7.25.9",
     "@percy/cli": "^1.32.7",
